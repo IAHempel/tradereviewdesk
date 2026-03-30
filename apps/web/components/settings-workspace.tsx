@@ -9,6 +9,30 @@ import type { Profile, SubscriptionSummary, TradingStyle, Watchlist } from "@tra
 import { BillingPortalButton, CheckoutButton } from "@/components/billing-actions";
 
 const tradingStyles: TradingStyle[] = ["day", "swing", "options", "mixed"];
+const brokerPlatformOptions = [
+  "Charles Schwab thinkorswim",
+  "Fidelity",
+  "Robinhood",
+  "E*TRADE",
+  "Interactive Brokers",
+  "Merrill Edge",
+  "Webull",
+  "TradeStation",
+  "Tastytrade",
+  "Public",
+  "SoFi Invest",
+  "J.P. Morgan Self-Directed Investing",
+  "Vanguard",
+  "Ally Invest",
+  "Moomoo",
+  "Firstrade",
+  "Lightspeed",
+  "M1 Finance",
+  "Cobra Trading",
+  "CenterPoint Securities",
+] as const;
+
+const OTHER_BROKER_VALUE = "other";
 
 export function SettingsWorkspace({
   profile,
@@ -28,6 +52,18 @@ export function SettingsWorkspace({
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [symbolMessage, setSymbolMessage] = useState<string | null>(null);
   const [editingSymbolId, setEditingSymbolId] = useState<string | null>(null);
+  const [selectedBrokerPlatform, setSelectedBrokerPlatform] = useState<string>(
+    profile?.broker_platform && brokerPlatformOptions.includes(profile.broker_platform as (typeof brokerPlatformOptions)[number])
+      ? profile.broker_platform
+      : profile?.broker_platform
+        ? OTHER_BROKER_VALUE
+        : "",
+  );
+  const [customBrokerPlatform, setCustomBrokerPlatform] = useState<string>(
+    profile?.broker_platform && !brokerPlatformOptions.includes(profile.broker_platform as (typeof brokerPlatformOptions)[number])
+      ? profile.broker_platform
+      : "",
+  );
 
   const defaultWatchlist = watchlists.find((watchlist) => watchlist.is_default) ?? watchlists[0] ?? null;
   const currentPlan = subscription?.plan ?? "free";
@@ -44,7 +80,17 @@ export function SettingsWorkspace({
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean),
-      broker_platform: String(formData.get("broker_platform") ?? "").trim() || null,
+      broker_platform:
+        (() => {
+          const selectedValue = String(formData.get("broker_platform_selection") ?? "").trim();
+          const customValue = String(formData.get("broker_platform_other") ?? "").trim();
+
+          if (selectedValue === OTHER_BROKER_VALUE) {
+            return customValue || null;
+          }
+
+          return selectedValue || null;
+        })(),
       onboarding_completed: formData.get("onboarding_completed") === "on",
     };
 
@@ -196,13 +242,35 @@ export function SettingsWorkspace({
           </label>
           <label className="grid gap-2 text-sm text-slate-300">
             Broker or platform
-            <input
-              name="broker_platform"
-              defaultValue={profile?.broker_platform ?? ""}
-              placeholder="Thinkorswim"
+            <select
+              name="broker_platform_selection"
+              value={selectedBrokerPlatform}
+              onChange={(event) => setSelectedBrokerPlatform(event.target.value)}
               className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-cyan-300/60"
-            />
+            >
+              <option value="">Select a broker or platform</option>
+              {brokerPlatformOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+              <option value={OTHER_BROKER_VALUE}>Other</option>
+            </select>
           </label>
+          {selectedBrokerPlatform === OTHER_BROKER_VALUE ? (
+            <label className="grid gap-2 text-sm text-slate-300">
+              Other broker or platform
+              <input
+                name="broker_platform_other"
+                value={customBrokerPlatform}
+                onChange={(event) => setCustomBrokerPlatform(event.target.value)}
+                placeholder="Enter another broker or platform"
+                className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-cyan-300/60"
+              />
+            </label>
+          ) : (
+            <input name="broker_platform_other" type="hidden" value="" />
+          )}
           <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
             <input
               type="checkbox"
