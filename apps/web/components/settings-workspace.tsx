@@ -102,8 +102,9 @@ export function SettingsWorkspace({
         body: JSON.stringify(payload),
       });
 
+      const data = (await response.json()) as { detail?: string; message?: string };
       if (!response.ok) {
-        setProfileMessage("Profile update failed. Check the API connection and try again.");
+        setProfileMessage(data.detail ?? data.message ?? "Profile update failed. Check the API connection and try again.");
         return;
       }
 
@@ -272,14 +273,19 @@ export function SettingsWorkspace({
               value={selectedBrokerPlatform}
               onChange={(event) => setSelectedBrokerPlatform(event.target.value)}
               className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-cyan-300/60"
+              style={{ colorScheme: "dark" }}
             >
-              <option value="">Select a broker or platform</option>
+              <option value="" className="bg-slate-950 text-white">
+                Select a broker or platform
+              </option>
               {brokerPlatformOptions.map((option) => (
-                <option key={option} value={option}>
+                <option key={option} value={option} className="bg-slate-950 text-white">
                   {option}
                 </option>
               ))}
-              <option value={OTHER_BROKER_VALUE}>Other</option>
+              <option value={OTHER_BROKER_VALUE} className="bg-slate-950 text-white">
+                Other
+              </option>
             </select>
           </label>
           {selectedBrokerPlatform === OTHER_BROKER_VALUE ? (
