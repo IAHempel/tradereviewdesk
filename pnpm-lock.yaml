@@ -12,7 +12,7 @@ importers:
     dependencies:
       '@clerk/nextjs':
         specifier: ^7.0.7
-        version: 7.0.7(next@15.2.8(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+        version: 7.0.7(next@15.2.8(react-dom@19.0.3(react@19.0.3))(react@19.0.3))(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
       '@tradenoc/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -27,13 +27,13 @@ importers:
         version: 2.1.1
       next:
         specifier: 15.2.8
-        version: 15.2.8(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+        version: 15.2.8(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
       react:
-        specifier: 19.0.0
-        version: 19.0.0
+        specifier: 19.0.3
+        version: 19.0.3
       react-dom:
-        specifier: 19.0.0
-        version: 19.0.0(react@19.0.0)
+        specifier: 19.0.3
+        version: 19.0.3(react@19.0.3)
     devDependencies:
       '@types/node':
         specifier: ^22.13.10
@@ -662,8 +662,17 @@ packages:
     peerDependencies:
       react: ^19.0.0
 
+  react-dom@19.0.3:
+    resolution: {integrity: sha512-a7ezLfxibhu6fZBVLwy6WEd3Jn/4H8JYVO8K8GtBfRf1Pl+ox7KFoMCzAGlxLZUXo0t44YZShzhhoDH3yMVdxQ==}
+    peerDependencies:
+      react: ^19.0.3
+
   react@19.0.0:
     resolution: {integrity: sha512-V8AVnmPIICiWpGfm6GLzCR/W5FXLchHop40W4nXBmdlEceh16rCN8O8LNWm5bh5XUX91fh7KpA+W0TgMKmgTpQ==}
+    engines: {node: '>=0.10.0'}
+
+  react@19.0.3:
+    resolution: {integrity: sha512-owzQanTgpB8GF7pVL6mUwZZyhKzFePi9++GkFk54i9PRU0jq+z7v9Mwg7PAZJYCiYl5YwcyQGGq5/PLkesd8nw==}
     engines: {node: '>=0.10.0'}
 
   read-cache@1.0.0:
@@ -789,34 +798,34 @@ snapshots:
 
   '@alloc/quick-lru@5.2.0': {}
 
-  '@clerk/backend@3.2.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+  '@clerk/backend@3.2.3(react-dom@19.0.3(react@19.0.3))(react@19.0.3)':
     dependencies:
-      '@clerk/shared': 4.3.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@clerk/shared': 4.3.2(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
       standardwebhooks: 1.0.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - react
       - react-dom
 
-  '@clerk/nextjs@7.0.7(next@15.2.8(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+  '@clerk/nextjs@7.0.7(next@15.2.8(react-dom@19.0.3(react@19.0.3))(react@19.0.3))(react-dom@19.0.3(react@19.0.3))(react@19.0.3)':
     dependencies:
-      '@clerk/backend': 3.2.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@clerk/react': 6.1.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@clerk/shared': 4.3.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      next: 15.2.8(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      react: 19.0.0
-      react-dom: 19.0.0(react@19.0.0)
+      '@clerk/backend': 3.2.3(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
+      '@clerk/react': 6.1.3(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
+      '@clerk/shared': 4.3.2(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
+      next: 15.2.8(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
+      react: 19.0.3
+      react-dom: 19.0.3(react@19.0.3)
       server-only: 0.0.1
       tslib: 2.8.1
 
-  '@clerk/react@6.1.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+  '@clerk/react@6.1.3(react-dom@19.0.3(react@19.0.3))(react@19.0.3)':
     dependencies:
-      '@clerk/shared': 4.3.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      react: 19.0.0
-      react-dom: 19.0.0(react@19.0.0)
+      '@clerk/shared': 4.3.2(react-dom@19.0.3(react@19.0.3))(react@19.0.3)
+      react: 19.0.3
+      react-dom: 19.0.3(react@19.0.3)
       tslib: 2.8.1
 
-  '@clerk/shared@4.3.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+  '@clerk/shared@4.3.2(react-dom@19.0.3(react@19.0.3))(react@19.0.3)':
     dependencies:
       '@tanstack/query-core': 5.90.16
       dequal: 2.0.3
@@ -824,8 +833,8 @@ snapshots:
       js-cookie: 3.0.5
       std-env: 3.10.0
     optionalDependencies:
-      react: 19.0.0
-      react-dom: 19.0.0(react@19.0.0)
+      react: 19.0.3
+      react-dom: 19.0.3(react@19.0.3)
 
   '@emnapi/runtime@1.9.1':
     dependencies:
@@ -1165,7 +1174,7 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  next@15.2.8(react-dom@19.0.0(react@19.0.0))(react@19.0.0):
+  next@15.2.8(react-dom@19.0.3(react@19.0.3))(react@19.0.3):
     dependencies:
       '@next/env': 15.2.8
       '@swc/counter': 0.1.3
@@ -1173,9 +1182,9 @@ snapshots:
       busboy: 1.6.0
       caniuse-lite: 1.0.30001782
       postcss: 8.4.31
-      react: 19.0.0
-      react-dom: 19.0.0(react@19.0.0)
-      styled-jsx: 5.1.6(react@19.0.0)
+      react: 19.0.3
+      react-dom: 19.0.3(react@19.0.3)
+      styled-jsx: 5.1.6(react@19.0.3)
     optionalDependencies:
       '@next/swc-darwin-arm64': 15.2.5
       '@next/swc-darwin-x64': 15.2.5
@@ -1260,7 +1269,14 @@ snapshots:
       react: 19.0.0
       scheduler: 0.25.0
 
+  react-dom@19.0.3(react@19.0.3):
+    dependencies:
+      react: 19.0.3
+      scheduler: 0.25.0
+
   react@19.0.0: {}
+
+  react@19.0.3: {}
 
   read-cache@1.0.0:
     dependencies:
@@ -1332,10 +1348,10 @@ snapshots:
 
   streamsearch@1.1.0: {}
 
-  styled-jsx@5.1.6(react@19.0.0):
+  styled-jsx@5.1.6(react@19.0.3):
     dependencies:
       client-only: 0.0.1
-      react: 19.0.0
+      react: 19.0.3
 
   sucrase@3.35.1:
     dependencies:
