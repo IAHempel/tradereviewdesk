@@ -284,7 +284,12 @@ export function WatchlistPanel({ watchlists }: { watchlists: Watchlist[] }) {
           <input type="checkbox" name="watchlist_is_default" className="size-4 accent-emerald-300" />
           Make this the default watchlist
         </label>
-        <button type="submit" disabled={isPending} className="inline-flex items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60">
+        <button
+          type="submit"
+          disabled={isPending}
+          className="inline-flex items-center justify-center rounded-full border border-emerald-100 bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 shadow-[0_12px_30px_rgba(52,211,153,0.22)] transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ backgroundColor: "#6ee7b7", color: "#022c22", borderColor: "#d1fae5" }}
+        >
           {isPending ? "Creating..." : "Create watchlist"}
         </button>
       </form>
