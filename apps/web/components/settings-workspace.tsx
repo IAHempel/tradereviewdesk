@@ -225,11 +225,17 @@ export function SettingsWorkspace({
               Changes are not saved until you click <span className="font-medium text-white">Save profile &amp; onboarding</span>.
             </p>
           </div>
+        </div>
+        <div className="mb-6 rounded-2xl border-2 border-cyan-300/60 bg-cyan-300/15 p-4 shadow-[0_20px_60px_rgba(34,211,238,0.18)]">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-200">Save Required</p>
+          <p className="mt-2 text-sm text-white">
+            Profile and onboarding changes stay local to this form until you save them.
+          </p>
           <button
             type="submit"
             form="profile-settings-form"
             disabled={isPending}
-            className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
+            className="mt-4 flex w-full items-center justify-center rounded-2xl border-2 border-white/80 bg-cyan-300 px-6 py-4 text-base font-semibold text-slate-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isPending ? "Saving..." : "Save profile & onboarding"}
           </button>
@@ -316,26 +322,24 @@ export function SettingsWorkspace({
             <button
               type="submit"
               disabled={isPending}
-              className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
+              className="rounded-full border-2 border-white/80 bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_16px_40px_rgba(34,211,238,0.24)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending ? "Saving..." : "Save profile & onboarding"}
             </button>
           </div>
         </form>
         <div className="sticky bottom-4 mt-6 rounded-2xl border border-cyan-300/20 bg-slate-950/95 p-3 shadow-[0_24px_80px_rgba(15,23,42,0.45)] backdrop-blur">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-300">
-              Save your onboarding changes before leaving this page.
-            </p>
-            <button
-              type="submit"
-              form="profile-settings-form"
-              disabled={isPending}
-              className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
-            >
-              {isPending ? "Saving..." : "Save profile & onboarding"}
-            </button>
-          </div>
+          <p className="text-sm text-slate-300">
+            Save your onboarding changes before leaving this page.
+          </p>
+          <button
+            type="submit"
+            form="profile-settings-form"
+            disabled={isPending}
+            className="mt-3 flex w-full items-center justify-center rounded-2xl border-2 border-white/80 bg-cyan-300 px-5 py-4 text-base font-semibold text-slate-950 shadow-[0_16px_40px_rgba(34,211,238,0.24)] transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isPending ? "Saving..." : "Save profile & onboarding"}
+          </button>
         </div>
       </Card>
 
