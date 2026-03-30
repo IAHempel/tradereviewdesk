@@ -322,6 +322,21 @@ export function SettingsWorkspace({
             </button>
           </div>
         </form>
+        <div className="sticky bottom-4 mt-6 rounded-2xl border border-cyan-300/20 bg-slate-950/95 p-3 shadow-[0_24px_80px_rgba(15,23,42,0.45)] backdrop-blur">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-300">
+              Save your onboarding changes before leaving this page.
+            </p>
+            <button
+              type="submit"
+              form="profile-settings-form"
+              disabled={isPending}
+              className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
+            >
+              {isPending ? "Saving..." : "Save profile & onboarding"}
+            </button>
+          </div>
+        </div>
       </Card>
 
       <Card>

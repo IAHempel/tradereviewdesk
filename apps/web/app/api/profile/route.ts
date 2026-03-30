@@ -13,8 +13,11 @@ export async function GET() {
     const response = await backendFetch("/api/v1/profile", { cache: "no-store" });
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch {
-    return NextResponse.json({ message: "Unable to load profile." }, { status: 502 });
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Unable to load profile." },
+      { status: 502 },
+    );
   }
 }
 
@@ -32,7 +35,10 @@ export async function PUT(request: Request) {
     });
     const data = await response.json();
     return NextResponse.json(data, { status: response.status });
-  } catch {
-    return NextResponse.json({ message: "Unable to update profile." }, { status: 502 });
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "Unable to update profile." },
+      { status: 502 },
+    );
   }
 }
