@@ -45,7 +45,7 @@ async function readClientPayload(response: Response): Promise<{ detail?: string;
   if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
     return {
       message:
-        "The profile save request returned HTML instead of JSON. Check that the deployed web app is pointing to the correct Railway API domain.",
+        "The profile save request returned HTML instead of JSON. Check that Vercel API_BASE_URL is set to https://api.tradereviewdesk.com.",
     };
   }
 
@@ -244,16 +244,18 @@ export function SettingsWorkspace({
             </p>
           </div>
         </div>
-        <div className="mb-6 rounded-2xl border-2 border-amber-300/70 bg-amber-300/20 p-4 shadow-[0_20px_60px_rgba(251,191,36,0.18)]">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-100">Save Required</p>
-          <p className="mt-2 text-sm text-white">
-            Profile and onboarding changes stay local to this form until you save them.
-          </p>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-300/45 bg-amber-300/10 px-4 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">Save Required</p>
+            <p className="mt-1 text-sm text-slate-200">
+              Profile and onboarding changes stay local to this form until you save them.
+            </p>
+          </div>
           <button
             type="submit"
             form="profile-settings-form"
             disabled={isPending}
-            className="mt-4 flex w-full items-center justify-center rounded-2xl border-2 border-amber-100 bg-amber-300 px-6 py-4 text-base font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[0_16px_40px_rgba(251,191,36,0.35)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center rounded-full border border-amber-100 bg-amber-300 px-5 py-3 text-sm font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[0_12px_30px_rgba(251,191,36,0.22)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
             style={{ backgroundColor: "#fbbf24", color: "#020617", borderColor: "#fef3c7" }}
           >
             {isPending ? "Saving..." : "Save Profile & Onboarding"}
@@ -337,29 +339,7 @@ export function SettingsWorkspace({
             Mark onboarding as complete
           </label>
           <p className="text-sm text-slate-400">{profileMessage ?? "Profile changes save through the backend API."}</p>
-          <button
-            type="submit"
-            disabled={isPending}
-            className="flex w-full items-center justify-center rounded-2xl border-2 border-amber-100 bg-amber-300 px-6 py-4 text-base font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[0_16px_40px_rgba(251,191,36,0.28)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
-            style={{ backgroundColor: "#fbbf24", color: "#020617", borderColor: "#fef3c7" }}
-          >
-            {isPending ? "Saving..." : "Save Profile & Onboarding"}
-          </button>
         </form>
-        <div className="sticky bottom-4 mt-6 rounded-2xl border border-cyan-300/20 bg-slate-950/95 p-3 shadow-[0_24px_80px_rgba(15,23,42,0.45)] backdrop-blur">
-          <p className="text-sm text-slate-300">
-            Save your onboarding changes before leaving this page.
-          </p>
-          <button
-            type="submit"
-            form="profile-settings-form"
-            disabled={isPending}
-            className="mt-3 flex w-full items-center justify-center rounded-2xl border-2 border-amber-100 bg-amber-300 px-5 py-4 text-base font-bold uppercase tracking-[0.14em] text-slate-950 shadow-[0_16px_40px_rgba(251,191,36,0.28)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
-            style={{ backgroundColor: "#fbbf24", color: "#020617", borderColor: "#fef3c7" }}
-          >
-            {isPending ? "Saving..." : "Save Profile & Onboarding"}
-          </button>
-        </div>
       </Card>
 
       <Card>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getRouteAuthFailureResponse } from "@/lib/auth";
-import { backendFetch } from "@/lib/backend";
+import { backendFetch, getResolvedApiBaseUrl } from "@/lib/backend";
 
 async function readProxyPayload(response: Response): Promise<Record<string, unknown>> {
   const contentType = response.headers.get("content-type") ?? "";
@@ -14,7 +14,7 @@ async function readProxyPayload(response: Response): Promise<Record<string, unkn
   if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
     return {
       message:
-        "The profile API returned HTML instead of JSON. Check that API_BASE_URL points to the Railway API domain and that the API route is healthy.",
+        `The profile API returned HTML instead of JSON from ${getResolvedApiBaseUrl()}. Check that API_BASE_URL points to https://api.tradereviewdesk.com and that the API route is healthy.`,
     };
   }
 

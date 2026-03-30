@@ -31,6 +31,10 @@ function resolveApiBaseUrl(): string {
   return DEFAULT_API_BASE_URL;
 }
 
+export function getResolvedApiBaseUrl(): string {
+  return resolveApiBaseUrl();
+}
+
 export async function backendFetch(path: string, init?: RequestInit): Promise<Response> {
   const apiBaseUrl = resolveApiBaseUrl();
   const headers = new Headers(init?.headers);
