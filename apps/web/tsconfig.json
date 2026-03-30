@@ -1,0 +1,44 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types"
+    ],
+    "paths": {
+      "@tradenoc/config/*": [
+        "../../packages/config/src/*"
+      ],
+      "@tradenoc/schemas/*": [
+        "../../packages/schemas/src/*"
+      ],
+      "@tradenoc/types/*": [
+        "../../packages/types/src/*"
+      ],
+      "@tradenoc/ui/*": [
+        "../../packages/ui/src/*"
+      ],
+      "@tradenoc/utils/*": [
+        "../../packages/utils/src/*"
+      ],
+      "@/*": [
+        "./*"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "incremental": false
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "next-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

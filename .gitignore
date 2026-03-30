@@ -1,0 +1,17 @@
+node_modules
+.corepack
+.pnpm-store
+.next
+dist
+coverage
+*.tsbuildinfo
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.pyc
+apps/api/data/store_state.json
+.env
+.env.local
+.DS_Store

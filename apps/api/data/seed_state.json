@@ -1,0 +1,94 @@
+{
+  "profile": {
+    "email": "trader@example.com",
+    "display_name": "Jordan",
+    "trading_style": "mixed",
+    "pain_points": ["discipline", "risk sizing"],
+    "broker_platform": "Thinkorswim",
+    "onboarding_completed": false
+  },
+  "watchlists": [
+    {
+      "id": "default-watchlist",
+      "name": "Default Watchlist",
+      "is_default": true,
+      "symbols": [
+        {
+          "id": "aapl",
+          "symbol": "AAPL",
+          "notes": "Earnings follow-through watch",
+          "display_order": 1
+        },
+        {
+          "id": "nvda",
+          "symbol": "NVDA",
+          "notes": "Momentum continuation",
+          "display_order": 2
+        }
+      ]
+    }
+  ],
+  "checklist_templates": [
+    {
+      "id": "open-drive",
+      "name": "Open Drive Checklist",
+      "description": "Guardrails before opening range momentum entries.",
+      "is_default": true,
+      "items": [
+        {
+          "id": "1",
+          "label": "Catalyst is identified",
+          "description": "",
+          "is_required": true,
+          "display_order": 1
+        },
+        {
+          "id": "2",
+          "label": "Defined stop and size",
+          "description": "",
+          "is_required": true,
+          "display_order": 2
+        }
+      ]
+    }
+  ],
+  "checklist_runs": [
+    {
+      "id": "run-1",
+      "template_id": "open-drive",
+      "session_date": "2026-03-25",
+      "symbol": "NVDA",
+      "setup_tag": "momentum",
+      "reason_for_entry": "High relative volume with clear risk level.",
+      "confidence_score": 4,
+      "items": [
+        {
+          "label_snapshot": "Catalyst is identified",
+          "completed": true
+        },
+        {
+          "label_snapshot": "Defined stop and size",
+          "completed": true
+        }
+      ]
+    }
+  ],
+  "trades": [
+    {
+      "id": "trade-1",
+      "trade_date": "2026-03-25",
+      "symbol": "AAPL",
+      "asset_type": "stock",
+      "side": "long",
+      "quantity": 100,
+      "entry_price": 217.5,
+      "exit_price": 220.1,
+      "pnl": 260.0,
+      "fees": 2.0,
+      "tags": ["opening-range", "earnings-follow-through"],
+      "notes": "Respected planned risk and exit.",
+      "source_type": "manual"
+    }
+  ],
+  "reports": []
+}
