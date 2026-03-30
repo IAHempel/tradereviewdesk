@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { getServerUserContext, isClerkAuthEnabled } from "@/lib/auth";
+import { UserMenu } from "@/components/user-menu";
 
 const primaryNav = [
   { href: "/how-it-works", label: "How it works" },
@@ -27,20 +28,7 @@ export async function SiteHeader() {
             ))}
           </nav>
           {userContext && identityLabel ? (
-            <div className="flex items-center gap-3">
-              <Link
-                href="/app/dashboard"
-                className="hidden rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-cyan-300/60 sm:inline-flex"
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/app/settings"
-                className="inline-flex min-w-0 items-center rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-50 transition hover:border-cyan-300/50"
-              >
-                <span className="truncate">{identityLabel}</span>
-              </Link>
-            </div>
+            <UserMenu identityLabel={identityLabel} authEnabled={authEnabled} />
           ) : authEnabled ? (
             <div className="flex items-center gap-3">
               <Link
