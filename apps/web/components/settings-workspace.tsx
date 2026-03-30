@@ -69,6 +69,7 @@ export function SettingsWorkspace({
   const currentPlan = subscription?.plan ?? "free";
   const billingStatus = subscription?.status ?? "active";
   const editingSymbol = defaultWatchlist?.symbols.find((symbol) => symbol.id === editingSymbolId) ?? null;
+  const onboardingComplete = profile?.onboarding_completed ?? false;
 
   async function handleProfileSubmit(formData: FormData) {
     setProfileMessage(null);
@@ -202,13 +203,37 @@ export function SettingsWorkspace({
   return (
     <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
       <Card>
-        <div className="mb-6">
-          <h2 className="text-lg font-medium text-white">Profile and onboarding</h2>
-          <p className="mt-2 text-sm text-slate-300">
-            Save the core context TradeReviewDesk uses to personalize daily prep and reviews.
-          </p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-lg font-medium text-white">Profile and onboarding</h2>
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${
+                  onboardingComplete
+                    ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
+                    : "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                }`}
+              >
+                {onboardingComplete ? "Complete" : "Incomplete"}
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-slate-300">
+              Save the core context TradeReviewDesk uses to personalize daily prep and reviews.
+            </p>
+            <p className="mt-2 text-sm text-slate-400">
+              Changes are not saved until you click <span className="font-medium text-white">Save profile &amp; onboarding</span>.
+            </p>
+          </div>
+          <button
+            type="submit"
+            form="profile-settings-form"
+            disabled={isPending}
+            className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
+          >
+            {isPending ? "Saving..." : "Save profile & onboarding"}
+          </button>
         </div>
-        <form action={handleProfileSubmit} className="grid gap-4">
+        <form id="profile-settings-form" action={handleProfileSubmit} className="grid gap-4">
           <label className="grid gap-2 text-sm text-slate-300">
             Display name
             <input
@@ -287,7 +312,7 @@ export function SettingsWorkspace({
               disabled={isPending}
               className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
             >
-              {isPending ? "Saving..." : "Save profile"}
+              {isPending ? "Saving..." : "Save profile & onboarding"}
             </button>
           </div>
         </form>
