@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import CurrentUser, require_current_user
@@ -30,7 +32,15 @@ def create_watchlist(
 ) -> WatchlistResponse:
     if use_file_persistence():
         watchlists = state_store.list_watchlists(current_user)
-        item = WatchlistResponse(id=f"watchlist-{len(watchlists) + 1}", symbols=[], **payload.model_dump())
+        is_default = payload.is_default or not watchlists
+        if is_default:
+            watchlists = [watchlist.model_copy(update={"is_default": False}) for watchlist in watchlists]
+        item = WatchlistResponse(
+            id=str(uuid4()),
+            symbols=[],
+            name=payload.name,
+            is_default=is_default,
+        )
         watchlists.append(item)
         state_store.save_watchlists(watchlists, current_user)
         return item
@@ -48,7 +58,19 @@ def update_watchlist(
         watchlists = state_store.list_watchlists(current_user)
         for idx, watchlist in enumerate(watchlists):
             if watchlist.id == watchlist_id:
-                updated = watchlist.model_copy(update=payload.model_dump(exclude_unset=True))
+                updates = payload.model_dump(exclude_unset=True)
+                if updates.get("is_default"):
+                    watchlists = [
+                        item.model_copy(update={"is_default": item.id == watchlist_id})
+                        for item in watchlists
+                    ]
+                    updated = next(item for item in watchlists if item.id == watchlist_id)
+                else:
+                    if payload.is_default is False and not any(
+                        item.id != watchlist_id and item.is_default for item in watchlists
+                    ):
+                        updates["is_default"] = True
+                    updated = watchlist.model_copy(update=updates)
                 watchlists[idx] = updated
                 state_store.save_watchlists(watchlists, current_user)
                 return updated
@@ -63,8 +85,21 @@ def update_watchlist(
 @router.delete("/{watchlist_id}")
 def delete_watchlist(
     watchlist_id: str,
-    _current_user: CurrentUser = Depends(require_current_user),
+    current_user: CurrentUser = Depends(require_current_user),
 ) -> dict[str, str]:
+    if use_file_persistence():
+        watchlists = state_store.list_watchlists(current_user)
+        remaining = [watchlist for watchlist in watchlists if watchlist.id != watchlist_id]
+        if len(remaining) == len(watchlists):
+            raise HTTPException(status_code=404, detail="Watchlist not found")
+        if remaining and not any(watchlist.is_default for watchlist in remaining):
+            remaining[0] = remaining[0].model_copy(update={"is_default": True})
+        state_store.save_watchlists(remaining, current_user)
+        return {"deleted": watchlist_id}
+
+    deleted = watchlist_repository.delete_watchlist(watchlist_id, current_user)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
     return {"deleted": watchlist_id}
 
 
@@ -81,7 +116,7 @@ def create_symbol(
                 symbols = list(watchlist.symbols)
                 symbols.append(
                     WatchlistSymbolResponse(
-                        id=payload.symbol.lower(),
+                        id=str(uuid4()),
                         symbol=payload.symbol,
                         notes=payload.notes,
                         display_order=len(symbols) + 1,

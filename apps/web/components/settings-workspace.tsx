@@ -7,6 +7,7 @@ import { Card } from "@tradenoc/ui";
 import type { Profile, SubscriptionSummary, TradingStyle, Watchlist } from "@tradenoc/types";
 
 import { BillingPortalButton, CheckoutButton } from "@/components/billing-actions";
+import { WatchlistPanel } from "@/components/watchlist-panel";
 
 const tradingStyles: TradingStyle[] = ["day", "swing", "options", "mixed"];
 const brokerPlatformOptions = [
@@ -33,52 +34,9 @@ const brokerPlatformOptions = [
 ] as const;
 
 const OTHER_BROKER_VALUE = "other";
-const watchlistSymbolCatalog = [
-  { symbol: "AAPL", company: "Apple" },
-  { symbol: "MSFT", company: "Microsoft" },
-  { symbol: "NVDA", company: "NVIDIA" },
-  { symbol: "AMZN", company: "Amazon" },
-  { symbol: "META", company: "Meta Platforms" },
-  { symbol: "GOOGL", company: "Alphabet Class A" },
-  { symbol: "GOOG", company: "Alphabet Class C" },
-  { symbol: "TSLA", company: "Tesla" },
-  { symbol: "AMD", company: "Advanced Micro Devices" },
-  { symbol: "NFLX", company: "Netflix" },
-  { symbol: "AVGO", company: "Broadcom" },
-  { symbol: "COST", company: "Costco Wholesale" },
-  { symbol: "PLTR", company: "Palantir Technologies" },
-  { symbol: "SMCI", company: "Super Micro Computer" },
-  { symbol: "MU", company: "Micron Technology" },
-  { symbol: "INTC", company: "Intel" },
-  { symbol: "QCOM", company: "Qualcomm" },
-  { symbol: "CRM", company: "Salesforce" },
-  { symbol: "ADBE", company: "Adobe" },
-  { symbol: "ORCL", company: "Oracle" },
-  { symbol: "JPM", company: "JPMorgan Chase" },
-  { symbol: "BAC", company: "Bank of America" },
-  { symbol: "GS", company: "Goldman Sachs" },
-  { symbol: "WFC", company: "Wells Fargo" },
-  { symbol: "SPY", company: "SPDR S&P 500 ETF Trust" },
-  { symbol: "QQQ", company: "Invesco QQQ Trust" },
-  { symbol: "IWM", company: "iShares Russell 2000 ETF" },
-  { symbol: "DIA", company: "SPDR Dow Jones Industrial Average ETF" },
-  { symbol: "XLF", company: "Financial Select Sector SPDR Fund" },
-  { symbol: "XLK", company: "Technology Select Sector SPDR Fund" },
-  { symbol: "XLE", company: "Energy Select Sector SPDR Fund" },
-  { symbol: "XBI", company: "SPDR S&P Biotech ETF" },
-  { symbol: "SOXL", company: "Direxion Daily Semiconductor Bull 3X Shares" },
-  { symbol: "TQQQ", company: "ProShares UltraPro QQQ" },
-  { symbol: "COIN", company: "Coinbase Global" },
-  { symbol: "HOOD", company: "Robinhood Markets" },
-  { symbol: "RBLX", company: "Roblox" },
-  { symbol: "UBER", company: "Uber Technologies" },
-  { symbol: "SHOP", company: "Shopify" },
-  { symbol: "SNOW", company: "Snowflake" },
-] as const;
 
 async function readClientPayload(response: Response): Promise<{ detail?: string; message?: string }> {
   const contentType = response.headers.get("content-type") ?? "";
-
   if (contentType.includes("application/json")) {
     return (await response.json()) as { detail?: string; message?: string };
   }
@@ -87,7 +45,7 @@ async function readClientPayload(response: Response): Promise<{ detail?: string;
   if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
     return {
       message:
-        "The profile save request returned HTML instead of JSON. Check that Vercel API_BASE_URL is set to https://api.tradereviewdesk.com.",
+        "The profile save request returned HTML instead of JSON. Check that the deployed web app is pointing at the live Railway API.",
     };
   }
 
@@ -110,10 +68,6 @@ export function SettingsWorkspace({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
-  const [symbolMessage, setSymbolMessage] = useState<string | null>(null);
-  const [editingSymbolId, setEditingSymbolId] = useState<string | null>(null);
-  const [symbolQuery, setSymbolQuery] = useState("");
-  const [showSymbolSuggestions, setShowSymbolSuggestions] = useState(false);
   const [selectedBrokerPlatform, setSelectedBrokerPlatform] = useState<string>(
     profile?.broker_platform && brokerPlatformOptions.includes(profile.broker_platform as (typeof brokerPlatformOptions)[number])
       ? profile.broker_platform
@@ -127,22 +81,9 @@ export function SettingsWorkspace({
       : "",
   );
 
-  const defaultWatchlist = watchlists.find((watchlist) => watchlist.is_default) ?? watchlists[0] ?? null;
   const currentPlan = subscription?.plan ?? "free";
   const billingStatus = subscription?.status ?? "active";
-  const editingSymbol = defaultWatchlist?.symbols.find((symbol) => symbol.id === editingSymbolId) ?? null;
   const onboardingComplete = profile?.onboarding_completed ?? false;
-  const normalizedSymbolQuery = symbolQuery.trim().toLowerCase();
-  const symbolSuggestions =
-    normalizedSymbolQuery.length === 0
-      ? []
-      : watchlistSymbolCatalog
-          .filter(
-            (item) =>
-              item.symbol.toLowerCase().includes(normalizedSymbolQuery) ||
-              item.company.toLowerCase().includes(normalizedSymbolQuery),
-          )
-          .slice(0, 8);
 
   async function handleProfileSubmit(formData: FormData) {
     setProfileMessage(null);
@@ -158,11 +99,9 @@ export function SettingsWorkspace({
         (() => {
           const selectedValue = String(formData.get("broker_platform_selection") ?? "").trim();
           const customValue = String(formData.get("broker_platform_other") ?? "").trim();
-
           if (selectedValue === OTHER_BROKER_VALUE) {
             return customValue || null;
           }
-
           return selectedValue || null;
         })(),
       onboarding_completed: formData.get("onboarding_completed") === "on",
@@ -182,106 +121,6 @@ export function SettingsWorkspace({
       }
 
       setProfileMessage("Profile updated.");
-      router.refresh();
-    });
-  }
-
-  async function handleSymbolSubmit(formData: FormData) {
-    setSymbolMessage(null);
-
-    if (!defaultWatchlist) {
-      setSymbolMessage("Create or load a watchlist before adding symbols.");
-      return;
-    }
-
-    const rawSymbolInput = String(formData.get("symbol") ?? "").trim();
-    const matchedSymbol =
-      watchlistSymbolCatalog.find((item) => item.symbol.toLowerCase() === rawSymbolInput.toLowerCase()) ??
-      watchlistSymbolCatalog.find((item) => item.company.toLowerCase() === rawSymbolInput.toLowerCase());
-
-    const payload = {
-      symbol: (matchedSymbol?.symbol ?? rawSymbolInput).trim().toUpperCase(),
-      notes: String(formData.get("notes") ?? "").trim() || null,
-    };
-
-    if (!payload.symbol) {
-      setSymbolMessage("Enter a symbol before saving.");
-      return;
-    }
-
-    if (payload.symbol.includes(" ")) {
-      setSymbolMessage("Select a suggested ticker or enter a valid symbol like AAPL.");
-      return;
-    }
-
-    startTransition(async () => {
-      const response = await fetch(`/api/watchlists/${defaultWatchlist.id}/symbols`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = (await response.json()) as { detail?: string; message?: string };
-      if (!response.ok) {
-        setSymbolMessage(data.detail ?? data.message ?? "Unable to add symbol right now.");
-        return;
-      }
-
-      setSymbolMessage(`${payload.symbol} added to ${defaultWatchlist.name}.`);
-      setSymbolQuery("");
-      setShowSymbolSuggestions(false);
-      router.refresh();
-    });
-  }
-
-  async function handleSymbolUpdate(formData: FormData) {
-    if (!defaultWatchlist || !editingSymbol) {
-      return;
-    }
-
-    setSymbolMessage(null);
-    startTransition(async () => {
-      const response = await fetch(`/api/watchlists/${defaultWatchlist.id}/symbols/${editingSymbol.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: String(formData.get("notes") ?? "").trim() || null,
-        }),
-      });
-
-      const data = (await response.json()) as { detail?: string; message?: string };
-      if (!response.ok) {
-        setSymbolMessage(data.detail ?? data.message ?? "Unable to update symbol notes.");
-        return;
-      }
-
-      setEditingSymbolId(null);
-      setSymbolMessage(`${editingSymbol.symbol} updated.`);
-      router.refresh();
-    });
-  }
-
-  async function handleSymbolDelete(symbolId: string, symbol: string) {
-    if (!defaultWatchlist || !window.confirm(`Delete ${symbol} from ${defaultWatchlist.name}?`)) {
-      return;
-    }
-
-    setSymbolMessage(null);
-    startTransition(async () => {
-      const response = await fetch(`/api/watchlists/${defaultWatchlist.id}/symbols/${symbolId}`, {
-        method: "DELETE",
-      });
-
-      const data = (await response.json()) as { detail?: string; message?: string };
-      if (!response.ok) {
-        setSymbolMessage(data.detail ?? data.message ?? "Unable to delete symbol right now.");
-        return;
-      }
-
-      if (editingSymbolId === symbolId) {
-        setEditingSymbolId(null);
-      }
-      setSymbolMessage(`${symbol} removed from ${defaultWatchlist.name}.`);
       router.refresh();
     });
   }
@@ -314,9 +153,7 @@ export function SettingsWorkspace({
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-300/45 bg-amber-300/10 px-4 py-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">Save Required</p>
-            <p className="mt-1 text-sm text-slate-200">
-              Profile and onboarding changes stay local to this form until you save them.
-            </p>
+            <p className="mt-1 text-sm text-slate-200">Profile and onboarding changes stay local to this form until you save them.</p>
           </div>
           <button
             type="submit"
@@ -369,17 +206,11 @@ export function SettingsWorkspace({
               className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-cyan-300/60"
               style={{ colorScheme: "dark" }}
             >
-              <option value="" className="bg-slate-950 text-white">
-                Select a broker or platform
-              </option>
+              <option value="" className="bg-slate-950 text-white">Select a broker or platform</option>
               {brokerPlatformOptions.map((option) => (
-                <option key={option} value={option} className="bg-slate-950 text-white">
-                  {option}
-                </option>
+                <option key={option} value={option} className="bg-slate-950 text-white">{option}</option>
               ))}
-              <option value={OTHER_BROKER_VALUE} className="bg-slate-950 text-white">
-                Other
-              </option>
+              <option value={OTHER_BROKER_VALUE} className="bg-slate-950 text-white">Other</option>
             </select>
           </label>
           {selectedBrokerPlatform === OTHER_BROKER_VALUE ? (
@@ -409,144 +240,7 @@ export function SettingsWorkspace({
         </form>
       </Card>
 
-      <Card>
-        <div className="mb-6">
-          <h2 className="text-lg font-medium text-white">Watchlist setup</h2>
-          <p className="mt-2 text-sm text-slate-300">
-            Add, edit, or remove symbols so premarket briefs can stay focused.
-          </p>
-        </div>
-        <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
-          <p className="font-medium text-white">{defaultWatchlist?.name ?? "No watchlist loaded"}</p>
-          <p className="mt-2">
-            {defaultWatchlist
-              ? `${defaultWatchlist.symbols.length} symbol${defaultWatchlist.symbols.length === 1 ? "" : "s"} currently saved.`
-              : "The backend did not return a watchlist yet."}
-          </p>
-        </div>
-        <form action={handleSymbolSubmit} className="grid gap-4">
-          <label className="grid gap-2 text-sm text-slate-300">
-            Symbol or company
-            <div className="relative">
-              <input
-                name="symbol"
-                value={symbolQuery}
-                onChange={(event) => {
-                  setSymbolQuery(event.target.value);
-                  setShowSymbolSuggestions(true);
-                }}
-                onFocus={() => setShowSymbolSuggestions(true)}
-                placeholder="Type AAPL or Apple"
-                autoComplete="off"
-                className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-emerald-300/60"
-              />
-              {showSymbolSuggestions && symbolSuggestions.length > 0 ? (
-                <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-[0_18px_60px_rgba(15,23,42,0.55)]">
-                  {symbolSuggestions.map((item) => (
-                    <button
-                      key={item.symbol}
-                      type="button"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        setSymbolQuery(item.symbol);
-                        setShowSymbolSuggestions(false);
-                        setSymbolMessage(`${item.symbol} selected from suggestions.`);
-                      }}
-                      className="flex w-full items-center justify-between gap-4 border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.05]"
-                    >
-                      <span className="font-medium text-white">{item.symbol}</span>
-                      <span className="truncate text-sm text-slate-400">{item.company}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </label>
-          <p className="text-xs text-slate-400">
-            Start typing a ticker or company name, then choose one of the suggested matches.
-          </p>
-          <label className="grid gap-2 text-sm text-slate-300">
-            Note
-            <input
-              name="notes"
-              placeholder="High relative volume into earnings follow-through"
-              className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-emerald-300/60"
-            />
-          </label>
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-sm text-slate-400">{symbolMessage ?? "Symbols are added to the default watchlist."}</p>
-            <button
-              type="submit"
-              disabled={isPending || !defaultWatchlist}
-              className="rounded-full bg-emerald-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:opacity-60"
-            >
-              {isPending ? "Saving..." : "Add symbol"}
-            </button>
-          </div>
-        </form>
-
-        {editingSymbol ? (
-          <form key={editingSymbol.id} action={handleSymbolUpdate} className="mt-6 grid gap-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm font-medium text-white">Edit {editingSymbol.symbol}</p>
-              <button
-                type="button"
-                onClick={() => setEditingSymbolId(null)}
-                className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-cyan-300/60"
-              >
-                Cancel
-              </button>
-            </div>
-            <label className="grid gap-2 text-sm text-slate-300">
-              Note
-              <input
-                name="notes"
-                defaultValue={editingSymbol.notes ?? ""}
-                placeholder="High relative volume into earnings follow-through"
-                className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-cyan-300/60"
-              />
-            </label>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={isPending}
-                className="rounded-full bg-cyan-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
-              >
-                {isPending ? "Saving..." : "Update note"}
-              </button>
-            </div>
-          </form>
-        ) : null}
-
-        <ul className="mt-6 space-y-3 text-sm text-slate-300">
-          {(defaultWatchlist?.symbols ?? []).map((symbol) => (
-            <li key={symbol.id} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="font-medium text-white">{symbol.symbol}</p>
-                  <p className="mt-1 text-slate-400">{symbol.notes ?? "No note yet."}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingSymbolId(symbol.id)}
-                    className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-emerald-300/60"
-                  >
-                    Edit note
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSymbolDelete(symbol.id, symbol.symbol)}
-                    className="rounded-full border border-rose-400/30 px-4 py-2 text-sm font-medium text-rose-100 transition hover:border-rose-300/60"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Card>
+      <WatchlistPanel watchlists={watchlists} />
 
       <Card className="xl:col-span-2">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -566,39 +260,21 @@ export function SettingsWorkspace({
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-300">Free</p>
             <p className="mt-3 text-sm text-slate-300">Premarket prep, manual trades, and baseline workflow access.</p>
             <div className="mt-4">
-              <CheckoutButton
-                plan="free"
-                currentPlan={currentPlan}
-                authEnabled={authEnabled}
-                isAuthenticated={isAuthenticated}
-                className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-cyan-300/60 disabled:opacity-60"
-              />
+              <CheckoutButton plan="free" currentPlan={currentPlan} authEnabled={authEnabled} isAuthenticated={isAuthenticated} className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-cyan-300/60 disabled:opacity-60" />
             </div>
           </div>
           <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4">
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-300">Pro</p>
             <p className="mt-3 text-sm text-slate-300">Unlock checklists, full debriefs, and weekly review workflows.</p>
             <div className="mt-4">
-              <CheckoutButton
-                plan="pro"
-                currentPlan={currentPlan}
-                authEnabled={authEnabled}
-                isAuthenticated={isAuthenticated}
-                className="rounded-full bg-cyan-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60"
-              />
+              <CheckoutButton plan="pro" currentPlan={currentPlan} authEnabled={authEnabled} isAuthenticated={isAuthenticated} className="rounded-full bg-cyan-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-200 disabled:opacity-60" />
             </div>
           </div>
           <div className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 p-4">
             <p className="text-sm uppercase tracking-[0.18em] text-emerald-300">Elite</p>
             <p className="mt-3 text-sm text-slate-300">Reserve advanced analytics and export-ready reporting for later expansion.</p>
             <div className="mt-4">
-              <CheckoutButton
-                plan="elite"
-                currentPlan={currentPlan}
-                authEnabled={authEnabled}
-                isAuthenticated={isAuthenticated}
-                className="rounded-full bg-emerald-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:opacity-60"
-              />
+              <CheckoutButton plan="elite" currentPlan={currentPlan} authEnabled={authEnabled} isAuthenticated={isAuthenticated} className="rounded-full bg-emerald-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:opacity-60" />
             </div>
           </div>
         </div>

@@ -17,3 +17,22 @@ export async function GET() {
     return NextResponse.json({ message: "Unable to load watchlists." }, { status: 502 });
   }
 }
+
+export async function POST(request: Request) {
+  try {
+    const authFailure = await getRouteAuthFailureResponse();
+    if (authFailure) {
+      return authFailure;
+    }
+
+    const body = await request.json();
+    const response = await backendFetch("/api/v1/watchlists", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    return NextResponse.json(data, { status: response.status });
+  } catch {
+    return NextResponse.json({ message: "Unable to create watchlist." }, { status: 502 });
+  }
+}

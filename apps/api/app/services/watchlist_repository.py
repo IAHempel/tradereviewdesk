@@ -90,7 +90,14 @@ def create_watchlist(payload: WatchlistCreate, current_user: CurrentUser) -> Wat
     def action() -> WatchlistResponse:
         with SessionLocal() as session:
             user = get_or_create_current_user(session, current_user)
-            watchlist = Watchlist(user_id=user.id, name=payload.name, is_default=payload.is_default)
+            existing_watchlists = list(session.scalars(select(Watchlist).where(Watchlist.user_id == user.id)))
+            is_default = payload.is_default or not existing_watchlists
+            if is_default:
+                for item in existing_watchlists:
+                    item.is_default = False
+                    session.add(item)
+
+            watchlist = Watchlist(user_id=user.id, name=payload.name, is_default=is_default)
             session.add(watchlist)
             session.commit()
             session.refresh(watchlist)
@@ -114,7 +121,29 @@ def update_watchlist(watchlist_id: str, payload: WatchlistUpdate, current_user: 
             if payload.name is not None:
                 watchlist.name = payload.name
             if payload.is_default is not None:
-                watchlist.is_default = payload.is_default
+                if payload.is_default:
+                    for item in session.scalars(select(Watchlist).where(Watchlist.user_id == user.id, Watchlist.id != watchlist_id)):
+                        item.is_default = False
+                        session.add(item)
+                    watchlist.is_default = True
+                else:
+                    has_other_default = session.scalar(
+                        select(Watchlist.id).where(
+                            Watchlist.user_id == user.id,
+                            Watchlist.id != watchlist_id,
+                            Watchlist.is_default.is_(True),
+                        )
+                    )
+                    watchlist.is_default = bool(has_other_default)
+                    if not watchlist.is_default:
+                        replacement = session.scalar(
+                            select(Watchlist)
+                            .where(Watchlist.user_id == user.id, Watchlist.id != watchlist_id)
+                            .order_by(Watchlist.created_at.asc())
+                        )
+                        if replacement is not None:
+                            replacement.is_default = True
+                            session.add(replacement)
 
             session.add(watchlist)
             session.commit()
@@ -206,6 +235,38 @@ def delete_symbol(watchlist_id: str, symbol_id: str, current_user: CurrentUser) 
             if symbol is None:
                 return False
             session.delete(symbol)
+            session.commit()
+            return True
+
+    return with_db_fallback(action)
+
+
+def delete_watchlist(watchlist_id: str, current_user: CurrentUser) -> bool | None:
+    def action() -> bool:
+        with SessionLocal() as session:
+            user = get_or_create_current_user(session, current_user)
+            watchlist = session.scalar(
+                select(Watchlist)
+                .options(selectinload(Watchlist.symbols))
+                .where(Watchlist.id == watchlist_id, Watchlist.user_id == user.id)
+            )
+            if watchlist is None:
+                return False
+
+            was_default = watchlist.is_default
+            session.delete(watchlist)
+            session.flush()
+
+            if was_default:
+                replacement = session.scalar(
+                    select(Watchlist)
+                    .where(Watchlist.user_id == user.id)
+                    .order_by(Watchlist.created_at.asc())
+                )
+                if replacement is not None:
+                    replacement.is_default = True
+                    session.add(replacement)
+
             session.commit()
             return True
 
