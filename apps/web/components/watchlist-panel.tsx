@@ -330,7 +330,7 @@ export function WatchlistPanel({ watchlists }: { watchlists: Watchlist[] }) {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-white">Add symbols to {activeWatchlist.name}</p>
-                <p className="mt-1 text-sm text-slate-400">Click Add on a suggestion for quick entry, or attach a note before saving.</p>
+                <p className="mt-1 text-sm text-slate-400">Use the suggestion list for one-click adds, or enter a custom ticker and save it with a note.</p>
               </div>
               <div className="rounded-full border border-white/10 bg-slate-950/60 px-4 py-2 text-xs uppercase tracking-[0.18em] text-slate-300">{visibleRows.length}/{rows.length} visible</div>
             </div>
@@ -359,7 +359,13 @@ export function WatchlistPanel({ watchlists }: { watchlists: Watchlist[] }) {
                               <p className="font-medium text-white">{item.symbol}</p>
                               <p className="text-sm text-slate-400">{item.company} | {formatAssetType(item.assetType)} | {item.category}</p>
                             </div>
-                            <button type="button" onMouseDown={(event) => { event.preventDefault(); void addSymbol(item.symbol); }} disabled={isPending || alreadySaved} className="rounded-full bg-emerald-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60">
+                            <button
+                              type="button"
+                              onMouseDown={(event) => { event.preventDefault(); void addSymbol(item.symbol); }}
+                              disabled={isPending || alreadySaved}
+                              className="rounded-full border border-emerald-100 bg-emerald-300 px-4 py-2 text-sm font-bold text-slate-950 shadow-[0_12px_24px_rgba(52,211,153,0.22)] transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+                              style={{ backgroundColor: "#6ee7b7", color: "#022c22", borderColor: "#d1fae5" }}
+                            >
                               {alreadySaved ? "Added" : "Add"}
                             </button>
                           </div>
@@ -369,22 +375,29 @@ export function WatchlistPanel({ watchlists }: { watchlists: Watchlist[] }) {
                   ) : null}
                 </div>
               </label>
-              <p className="text-xs text-slate-400">Search by ticker or company name. You can also submit a custom ticker directly.</p>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-xs text-slate-400">
+                Type a ticker or company name, then click <span className="font-medium text-white">Add</span> on a suggestion for a one-click entry. If you are entering a custom ticker, use the note field and the button below.
+              </div>
               <label className="grid gap-2 text-sm text-slate-300">
                 Note
                 <input name="notes" placeholder="Why this belongs on the list today" className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-300/60" />
               </label>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <p className="text-sm text-slate-400">{symbolMessage ?? "Add symbols, then sort and filter them below."}</p>
-                <button type="submit" disabled={isPending} className="rounded-full bg-emerald-300 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60">
-                  {isPending ? "Saving..." : "Add selected symbol"}
+                <button
+                  type="submit"
+                  disabled={isPending}
+                  className="rounded-full border border-emerald-100 bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 shadow-[0_12px_24px_rgba(52,211,153,0.22)] transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: "#6ee7b7", color: "#022c22", borderColor: "#d1fae5" }}
+                >
+                  {isPending ? "Saving..." : "Add custom symbol"}
                 </button>
               </div>
             </form>
           </div>
 
-          <div className="mt-6 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="grid gap-2 text-sm text-slate-300">
+          <div className="mt-6 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 lg:grid-cols-2">
+            <label className="grid gap-2 text-sm text-slate-300 lg:col-span-2">
               Search within list
               <input value={watchlistSearch} onChange={(event) => setWatchlistSearch(event.target.value)} placeholder="Ticker, company, note" className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-cyan-300/60" />
             </label>
