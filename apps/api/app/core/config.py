@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     def strip_string_values(cls, value: str) -> str:
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        return value
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
