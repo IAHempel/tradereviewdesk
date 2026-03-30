@@ -3,8 +3,25 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-API_ROOT = Path(__file__).resolve().parents[2]
+CURRENT_FILE = Path(__file__).resolve()
+
+
+def _find_api_root() -> Path:
+    for candidate in CURRENT_FILE.parents:
+        if (candidate / "app").is_dir() and (candidate / "requirements.txt").exists():
+            return candidate
+    return CURRENT_FILE.parents[2]
+
+
+def _find_repo_root(api_root: Path) -> Path:
+    for candidate in api_root.parents:
+        if (candidate / "pnpm-workspace.yaml").exists() or (candidate / "package.json").exists():
+            return candidate
+    return api_root
+
+
+API_ROOT = _find_api_root()
+REPO_ROOT = _find_repo_root(API_ROOT)
 
 
 class Settings(BaseSettings):
