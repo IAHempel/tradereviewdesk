@@ -33,6 +33,48 @@ const brokerPlatformOptions = [
 ] as const;
 
 const OTHER_BROKER_VALUE = "other";
+const watchlistSymbolCatalog = [
+  { symbol: "AAPL", company: "Apple" },
+  { symbol: "MSFT", company: "Microsoft" },
+  { symbol: "NVDA", company: "NVIDIA" },
+  { symbol: "AMZN", company: "Amazon" },
+  { symbol: "META", company: "Meta Platforms" },
+  { symbol: "GOOGL", company: "Alphabet Class A" },
+  { symbol: "GOOG", company: "Alphabet Class C" },
+  { symbol: "TSLA", company: "Tesla" },
+  { symbol: "AMD", company: "Advanced Micro Devices" },
+  { symbol: "NFLX", company: "Netflix" },
+  { symbol: "AVGO", company: "Broadcom" },
+  { symbol: "COST", company: "Costco Wholesale" },
+  { symbol: "PLTR", company: "Palantir Technologies" },
+  { symbol: "SMCI", company: "Super Micro Computer" },
+  { symbol: "MU", company: "Micron Technology" },
+  { symbol: "INTC", company: "Intel" },
+  { symbol: "QCOM", company: "Qualcomm" },
+  { symbol: "CRM", company: "Salesforce" },
+  { symbol: "ADBE", company: "Adobe" },
+  { symbol: "ORCL", company: "Oracle" },
+  { symbol: "JPM", company: "JPMorgan Chase" },
+  { symbol: "BAC", company: "Bank of America" },
+  { symbol: "GS", company: "Goldman Sachs" },
+  { symbol: "WFC", company: "Wells Fargo" },
+  { symbol: "SPY", company: "SPDR S&P 500 ETF Trust" },
+  { symbol: "QQQ", company: "Invesco QQQ Trust" },
+  { symbol: "IWM", company: "iShares Russell 2000 ETF" },
+  { symbol: "DIA", company: "SPDR Dow Jones Industrial Average ETF" },
+  { symbol: "XLF", company: "Financial Select Sector SPDR Fund" },
+  { symbol: "XLK", company: "Technology Select Sector SPDR Fund" },
+  { symbol: "XLE", company: "Energy Select Sector SPDR Fund" },
+  { symbol: "XBI", company: "SPDR S&P Biotech ETF" },
+  { symbol: "SOXL", company: "Direxion Daily Semiconductor Bull 3X Shares" },
+  { symbol: "TQQQ", company: "ProShares UltraPro QQQ" },
+  { symbol: "COIN", company: "Coinbase Global" },
+  { symbol: "HOOD", company: "Robinhood Markets" },
+  { symbol: "RBLX", company: "Roblox" },
+  { symbol: "UBER", company: "Uber Technologies" },
+  { symbol: "SHOP", company: "Shopify" },
+  { symbol: "SNOW", company: "Snowflake" },
+] as const;
 
 async function readClientPayload(response: Response): Promise<{ detail?: string; message?: string }> {
   const contentType = response.headers.get("content-type") ?? "";
@@ -70,6 +112,8 @@ export function SettingsWorkspace({
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [symbolMessage, setSymbolMessage] = useState<string | null>(null);
   const [editingSymbolId, setEditingSymbolId] = useState<string | null>(null);
+  const [symbolQuery, setSymbolQuery] = useState("");
+  const [showSymbolSuggestions, setShowSymbolSuggestions] = useState(false);
   const [selectedBrokerPlatform, setSelectedBrokerPlatform] = useState<string>(
     profile?.broker_platform && brokerPlatformOptions.includes(profile.broker_platform as (typeof brokerPlatformOptions)[number])
       ? profile.broker_platform
@@ -88,6 +132,17 @@ export function SettingsWorkspace({
   const billingStatus = subscription?.status ?? "active";
   const editingSymbol = defaultWatchlist?.symbols.find((symbol) => symbol.id === editingSymbolId) ?? null;
   const onboardingComplete = profile?.onboarding_completed ?? false;
+  const normalizedSymbolQuery = symbolQuery.trim().toLowerCase();
+  const symbolSuggestions =
+    normalizedSymbolQuery.length === 0
+      ? []
+      : watchlistSymbolCatalog
+          .filter(
+            (item) =>
+              item.symbol.toLowerCase().includes(normalizedSymbolQuery) ||
+              item.company.toLowerCase().includes(normalizedSymbolQuery),
+          )
+          .slice(0, 8);
 
   async function handleProfileSubmit(formData: FormData) {
     setProfileMessage(null);
@@ -139,13 +194,23 @@ export function SettingsWorkspace({
       return;
     }
 
+    const rawSymbolInput = String(formData.get("symbol") ?? "").trim();
+    const matchedSymbol =
+      watchlistSymbolCatalog.find((item) => item.symbol.toLowerCase() === rawSymbolInput.toLowerCase()) ??
+      watchlistSymbolCatalog.find((item) => item.company.toLowerCase() === rawSymbolInput.toLowerCase());
+
     const payload = {
-      symbol: String(formData.get("symbol") ?? "").trim().toUpperCase(),
+      symbol: (matchedSymbol?.symbol ?? rawSymbolInput).trim().toUpperCase(),
       notes: String(formData.get("notes") ?? "").trim() || null,
     };
 
     if (!payload.symbol) {
       setSymbolMessage("Enter a symbol before saving.");
+      return;
+    }
+
+    if (payload.symbol.includes(" ")) {
+      setSymbolMessage("Select a suggested ticker or enter a valid symbol like AAPL.");
       return;
     }
 
@@ -163,6 +228,8 @@ export function SettingsWorkspace({
       }
 
       setSymbolMessage(`${payload.symbol} added to ${defaultWatchlist.name}.`);
+      setSymbolQuery("");
+      setShowSymbolSuggestions(false);
       router.refresh();
     });
   }
@@ -359,13 +426,45 @@ export function SettingsWorkspace({
         </div>
         <form action={handleSymbolSubmit} className="grid gap-4">
           <label className="grid gap-2 text-sm text-slate-300">
-            Symbol
-            <input
-              name="symbol"
-              placeholder="AAPL"
-              className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-emerald-300/60"
-            />
+            Symbol or company
+            <div className="relative">
+              <input
+                name="symbol"
+                value={symbolQuery}
+                onChange={(event) => {
+                  setSymbolQuery(event.target.value);
+                  setShowSymbolSuggestions(true);
+                }}
+                onFocus={() => setShowSymbolSuggestions(true)}
+                placeholder="Type AAPL or Apple"
+                autoComplete="off"
+                className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-emerald-300/60"
+              />
+              {showSymbolSuggestions && symbolSuggestions.length > 0 ? (
+                <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-[0_18px_60px_rgba(15,23,42,0.55)]">
+                  {symbolSuggestions.map((item) => (
+                    <button
+                      key={item.symbol}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setSymbolQuery(item.symbol);
+                        setShowSymbolSuggestions(false);
+                        setSymbolMessage(`${item.symbol} selected from suggestions.`);
+                      }}
+                      className="flex w-full items-center justify-between gap-4 border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.05]"
+                    >
+                      <span className="font-medium text-white">{item.symbol}</span>
+                      <span className="truncate text-sm text-slate-400">{item.company}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </label>
+          <p className="text-xs text-slate-400">
+            Start typing a ticker or company name, then choose one of the suggested matches.
+          </p>
           <label className="grid gap-2 text-sm text-slate-300">
             Note
             <input
