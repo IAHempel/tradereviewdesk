@@ -30,7 +30,13 @@ export default async function SignupPage() {
           </p>
           {isClerkAuthEnabled() ? (
             <div className="mt-8 overflow-hidden rounded-3xl border border-white/10 bg-slate-900/70 p-2">
-              <SignUp />
+              <SignUp
+                path="/signup"
+                routing="path"
+                signInUrl="/login"
+                forceRedirectUrl="/app/dashboard"
+                fallbackRedirectUrl="/app/dashboard"
+              />
             </div>
           ) : (
             <div className="mt-8 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-sm text-amber-100">
