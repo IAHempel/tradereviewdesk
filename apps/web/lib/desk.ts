@@ -40,6 +40,9 @@ export const FALLBACK_DESK_CONFIG: DeskConfig = {
   use_journal_priors: true,
   use_trade_flow: true,
   flow_veto: 0.35,
+  use_ai_seat: true,
+  ai_seat_budget: 8,
+  seat_veto: 0.7,
   seed: null,
 };
 
@@ -80,6 +83,12 @@ export const DESK_AGENTS: AgentMeta[] = [
     label: "Risk",
     role: "Sizes by the smaller of your risk cap and fractional Kelly; halts on limits.",
     count: (p) => `${p.risk_sized.toLocaleString()} sized`,
+  },
+  {
+    id: "seat",
+    label: "Skeptic",
+    role: "Answers four yes/no risk questions with probabilities on every sized order and vetoes any that look too risky.",
+    count: (p) => `${p.seat_vetoes.toLocaleString()} vetoes`,
   },
   {
     id: "executor",

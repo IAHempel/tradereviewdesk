@@ -172,7 +172,7 @@ export interface ReportGenerationResult {
 }
 
 export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
-export type DeskAgent = "scout" | "flow" | "filter" | "analyst" | "risk" | "executor" | "logger";
+export type DeskAgent = "scout" | "flow" | "filter" | "analyst" | "risk" | "seat" | "executor" | "logger";
 export type DeskSide = "long" | "short";
 export type DeskDataSource = "synthetic" | "polygon" | "alpaca";
 
@@ -204,6 +204,9 @@ export interface DeskConfig {
   use_journal_priors: boolean;
   use_trade_flow: boolean;
   flow_veto: number;
+  use_ai_seat: boolean;
+  ai_seat_budget: number;
+  seat_veto: number;
   seed: number | null;
 }
 
@@ -221,6 +224,9 @@ export interface DeskPipelineCounts {
   stops_widened: number;
   logger_reasons: number;
   flow_vetoes: number;
+  seat_reviews: number;
+  seat_vetoes: number;
+  seat_ai_calls: number;
 }
 
 export interface DeskPosition {
@@ -289,6 +295,28 @@ export interface DeskTrade {
   score: number;
   win_probability: number;
   thesis: string;
+}
+
+export interface DeskSeatAnswer {
+  id: string;
+  question: string;
+  probability: number;
+  reason: string;
+}
+
+export interface DeskSeatVerdict {
+  step: number;
+  session: number;
+  clock: string;
+  symbol: string;
+  setup: DeskSetup;
+  side: DeskSide;
+  trade_id: string | null;
+  source: "llm" | "heuristic";
+  model: string | null;
+  answers: DeskSeatAnswer[];
+  thesis: string;
+  vetoed: boolean;
 }
 
 export interface DeskSetupEdge {
@@ -373,4 +401,5 @@ export interface DeskRun extends DeskRunSummary {
   monte_carlo: DeskMonteCarlo | null;
   disclaimer: string;
   flow_source: string;
+  seat_verdicts: DeskSeatVerdict[];
 }

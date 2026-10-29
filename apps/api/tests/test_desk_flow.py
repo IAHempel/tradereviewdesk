@@ -74,7 +74,7 @@ class FlowRulesTests(unittest.TestCase):
         self.assertEqual(result.flow_source, "bar proxy")
         self.assertTrue(all(set(frame.flow) == {"AAPL", "NVDA", "SPY", "QQQ"} for frame in result.frames))
         self.assertTrue(all(-1 <= value <= 1 for frame in result.frames for value in frame.flow.values()))
-        vetoes = [event for event in result.events if event.kind == "veto"]
+        vetoes = [event for event in result.events if event.agent == "flow" and event.kind == "veto"]
         self.assertGreater(len(vetoes), 0)
         self.assertEqual(result.pipeline.flow_vetoes, len(vetoes))
 

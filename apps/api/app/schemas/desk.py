@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversion"]
 DeskDataSource = Literal["synthetic", "polygon", "alpaca"]
-DeskAgent = Literal["scout", "flow", "filter", "analyst", "risk", "executor", "logger"]
+DeskAgent = Literal["scout", "flow", "filter", "analyst", "risk", "seat", "executor", "logger"]
 DeskSide = Literal["long", "short"]
 DeskExitReason = Literal["stop", "trail", "target", "bell"]
 DeskScanStatus = Literal["killed", "ordered"]
@@ -44,6 +44,9 @@ class DeskConfig(BaseModel):
     use_journal_priors: bool = True
     use_trade_flow: bool = True
     flow_veto: float = Field(default=0.35, ge=0.05, le=1.0)
+    use_ai_seat: bool = True
+    ai_seat_budget: int = Field(default=8, ge=0, le=30)
+    seat_veto: float = Field(default=0.7, ge=0.3, le=1.0)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
     @field_validator("symbols")
@@ -80,6 +83,9 @@ class DeskPipelineCounts(BaseModel):
     stops_widened: int = 0
     logger_reasons: int = 0
     flow_vetoes: int = 0
+    seat_reviews: int = 0
+    seat_vetoes: int = 0
+    seat_ai_calls: int = 0
 
 
 class DeskPosition(BaseModel):
@@ -148,6 +154,28 @@ class DeskTrade(BaseModel):
     score: int
     win_probability: float
     thesis: str
+
+
+class DeskSeatAnswer(BaseModel):
+    id: str
+    question: str
+    probability: float
+    reason: str
+
+
+class DeskSeatVerdict(BaseModel):
+    step: int
+    session: int
+    clock: str
+    symbol: str
+    setup: DeskSetup
+    side: DeskSide
+    trade_id: str | None = None
+    source: Literal["llm", "heuristic"]
+    model: str | None = None
+    answers: list[DeskSeatAnswer]
+    thesis: str
+    vetoed: bool
 
 
 class DeskSetupEdge(BaseModel):
@@ -238,4 +266,5 @@ class DeskRunResponse(DeskRunSummaryResponse):
     events: list[DeskEvent]
     monte_carlo: DeskMonteCarlo | None = None
     flow_source: str = "bar proxy"
+    seat_verdicts: list[DeskSeatVerdict] = Field(default_factory=list)
     disclaimer: str = DESK_DISCLAIMER

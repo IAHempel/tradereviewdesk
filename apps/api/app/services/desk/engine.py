@@ -15,6 +15,8 @@ from app.schemas.desk import (
     DeskPosition,
     DeskRunResponse,
     DeskScanMark,
+    DeskSeatAnswer,
+    DeskSeatVerdict,
     DeskSetup,
     DeskSetupEdge,
     DeskTrade,
@@ -43,6 +45,7 @@ from app.services.desk.calendar import market_today
 from app.services.desk.flow import FlowMemory, flow_level, proxy_flow
 from app.services.desk.historical import PROVIDERS, load_historical_feed
 from app.services.desk.market import Bar, MarketFeed, SimulatedMarketFeed, bar_clock
+from app.services.desk.seat import QUESTION_TEXT, SkepticSeat, build_context
 from app.services.desk.stats import build_summary, run_monte_carlo
 
 FALLBACK_SYMBOLS = ("SPY", "QQQ", "IWM", "AMD", "MSFT", "TSLA")
@@ -105,7 +108,9 @@ class DeskSession:
         self.analyst = AnalystAgent(config, journal)
         self.risk = RiskAgent(config)
         self.executor = ExecutorAgent(config)
+        self.seat = SkepticSeat(config)
         self.logger = LoggerAgent()
+        self.seat_verdicts: list[DeskSeatVerdict] = []
 
         self.realized = 0.0
         self.fees_paid = 0.0
@@ -410,11 +415,6 @@ class DeskSession:
                     continue
 
                 self.logger.counts.risk_sized += 1
-                trade_id = f"T{self.next_trade_number:03d}"
-                self.next_trade_number += 1
-                self.orders[symbol] = PaperOrder(
-                    trade_id=trade_id, setup=setup, sizing=sizing, assessment=assessment, placed_step=self.step
-                )
                 capped_note = " Size capped by buying power." if sizing.capped else ""
                 self.log(
                     "analyst",
@@ -429,6 +429,62 @@ class DeskSession:
                     f"Risking {sizing.risk_dollars:.2f} ({sizing.risk_fraction:.2%} of equity; full Kelly {sizing.kelly:.1%}) "
                     f"on {sizing.quantity:g} units.{capped_note}",
                     symbol,
+                )
+
+                review = self.seat.review(build_context(setup, self.tapes[symbol], self.flow[symbol], self.clock))
+                self.logger.counts.seat_reviews += 1
+                self.logger.counts.seat_ai_calls = self.seat.ai_calls
+                if review.note:
+                    self.log("seat", "fallback", review.note, symbol)
+                worst = review.worst
+                vetoed = worst.probability >= self.config.seat_veto
+                trade_id = None if vetoed else f"T{self.next_trade_number:03d}"
+                self.seat_verdicts.append(
+                    DeskSeatVerdict(
+                        step=self.step,
+                        session=self.session,
+                        clock=self.clock,
+                        symbol=symbol,
+                        setup=setup.setup,
+                        side=setup.side,
+                        trade_id=trade_id,
+                        source=review.source,
+                        model=review.model,
+                        answers=[
+                            DeskSeatAnswer(
+                                id=answer.id,
+                                question=QUESTION_TEXT[answer.id],
+                                probability=answer.probability,
+                                reason=answer.reason,
+                            )
+                            for answer in review.output.answers
+                        ],
+                        thesis=review.output.thesis,
+                        vetoed=vetoed,
+                    )
+                )
+                if vetoed:
+                    self.logger.counts.seat_vetoes += 1
+                    self.logger.kill("seat", "seat_veto")
+                    self.log(
+                        "seat",
+                        "veto",
+                        f"{label} vetoed: {QUESTION_TEXT[worst.id]} {worst.probability:.0%}. {worst.reason}",
+                        symbol,
+                    )
+                    scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="killed"))
+                    continue
+
+                self.log(
+                    "seat",
+                    "pass",
+                    f"Passed: highest risk {worst.probability:.0%} ({worst.id.replace('_', ' ')}). {review.output.thesis}",
+                    symbol,
+                )
+                assert trade_id is not None
+                self.next_trade_number += 1
+                self.orders[symbol] = PaperOrder(
+                    trade_id=trade_id, setup=setup, sizing=sizing, assessment=assessment, placed_step=self.step
                 )
                 self.log("executor", "order", f"Paper order queued for the next open ({trade_id}).", symbol)
                 scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="ordered"))
@@ -531,6 +587,7 @@ class DeskSession:
             monte_carlo=run_monte_carlo(self.trade_returns, seed=self.config.seed or 0),
             disclaimer=DESK_DISCLAIMER if self.feed.data_source == "synthetic" else HISTORICAL_DESK_DISCLAIMER,
             flow_source=self.feed.flow_source,
+            seat_verdicts=self.seat_verdicts,
         )
 
 

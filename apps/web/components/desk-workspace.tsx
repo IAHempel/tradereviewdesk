@@ -14,6 +14,7 @@ import {
   PipelineStrip,
   PositionsPanel,
   RunHistory,
+  SeatVerdicts,
   SetupEdgeBoard,
   StatTile,
 } from "@/components/desk-panels";
@@ -461,6 +462,13 @@ export function DeskWorkspace({
               )}
             </Panel>
           </div>
+
+          <Panel
+            title="Skeptic seat"
+            subtitle={`Four risk questions on every sized order; a ${formatPercent(run.config.seat_veto)} answer vetoes it. ${run.pipeline.seat_ai_calls} AI call${run.pipeline.seat_ai_calls === 1 ? "" : "s"} this run.`}
+          >
+            <SeatVerdicts verdicts={run.seat_verdicts ?? []} step={frame?.step ?? 0} threshold={run.config.seat_veto} />
+          </Panel>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel

@@ -41,6 +41,14 @@ class ReportGenerationProvider:
     def _is_live_provider_configured(self) -> bool:
         return not settings.is_placeholder_llm_key
 
+    @property
+    def is_live_configured(self) -> bool:
+        return self._is_live_provider_configured()
+
+    def request_json(self, *, system_prompt: str, user_prompt: str) -> ProviderGenerationResult:
+        """Raw JSON text from the live model, for callers that validate their own schema."""
+        return self._request_openai_json_output(system_prompt=system_prompt, user_prompt=user_prompt)
+
     def _require_live_provider_if_production(self) -> None:
         if settings.is_production and not self._is_live_provider_configured():
             raise LLMProviderError("LLM provider is not configured for production.")

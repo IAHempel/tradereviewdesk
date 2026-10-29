@@ -67,6 +67,7 @@ KILL_LABELS: dict[str, str] = {
     "kelly": "Kelly says no edge",
     "buying_power": "No buying power left",
     "flow_against": "Order flow against the trade",
+    "seat_veto": "Skeptic seat veto",
     "gap_stop": "Gapped through stop",
     "gap_target": "Gapped past target",
 }

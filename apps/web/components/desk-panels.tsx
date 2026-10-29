@@ -11,6 +11,7 @@ import type {
   DeskFrame,
   DeskRun,
   DeskRunSummary,
+  DeskSeatVerdict,
   DeskSetupEdge,
   DeskTrade,
 } from "@tradenoc/types";
@@ -37,6 +38,12 @@ const iconPaths: Record<DeskAgent, ReactNode> = {
     </>
   ),
   flow: <path d="M3 8h11l-3-3M21 16H10l3 3" />,
+  seat: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.2-3.6 3.8-5.5 7-5.5s5.8 1.9 7 5.5M16.5 4.5l2-2" />
+    </>
+  ),
   filter: <path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5Z" />,
   analyst: <path d="M5 19V11M10 19V6M15 19v-5M20 19V9" />,
   risk: <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />,
@@ -101,7 +108,7 @@ export function PipelineStrip({ frame, events, active }: { frame: DeskFrame | nu
             <span className="block h-full w-10 rounded-full bg-cyan-300/80 blur-[1px] motion-safe:animate-[desk-flow_1.6s_linear_infinite]" />
           </div>
         ) : null}
-        <ol className="relative grid grid-cols-4 gap-y-4 sm:grid-cols-7">
+        <ol className="relative grid grid-cols-4 gap-y-4 sm:grid-cols-8">
           {DESK_AGENTS.map((agent) => (
             <li key={agent.id} className="flex flex-col items-center text-center" title={agent.role}>
               <div className="flex h-5 items-end gap-1">
@@ -331,6 +338,65 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
         ))}
       </ol>
     </div>
+  );
+}
+
+const SEAT_SHORT_LABELS: Record<string, string> = {
+  chasing: "Chasing",
+  noise_stop: "Stop in noise",
+  against_context: "Against context",
+  thin_volume: "Thin volume",
+};
+
+export function SeatVerdicts({ verdicts, step, threshold }: { verdicts: DeskSeatVerdict[]; step: number; threshold: number }) {
+  const visible = verdicts.filter((verdict) => verdict.step <= step).slice(-4).reverse();
+  if (visible.length === 0) {
+    return <p className="text-sm text-slate-500">No orders have reached the seat yet.</p>;
+  }
+
+  return (
+    <ul className="space-y-4">
+      {visible.map((verdict) => (
+        <li key={`${verdict.step}-${verdict.symbol}-${verdict.setup}`} className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="tabular-nums text-slate-500">
+              S{verdict.session} {verdict.clock}
+            </span>
+            <span className="font-semibold text-white">{verdict.symbol}</span>
+            <span className="text-slate-400">
+              {verdict.side} {SETUP_LABELS[verdict.setup].toLowerCase()}
+            </span>
+            <span
+              className={clsx(
+                "ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                verdict.vetoed ? "border-rose-300/40 bg-rose-400/10 text-rose-100" : "border-emerald-300/40 bg-emerald-400/10 text-emerald-100",
+              )}
+            >
+              {verdict.vetoed ? "Vetoed" : `Passed · ${verdict.trade_id}`}
+            </span>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {verdict.answers.map((answer) => (
+              <li key={answer.id} className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2 text-[11px]" title={`${answer.question} ${answer.reason}`}>
+                <span className="text-slate-400">{SEAT_SHORT_LABELS[answer.id] ?? answer.id}</span>
+                <span className="relative h-2 rounded-full bg-white/10">
+                  <span
+                    className={clsx("absolute inset-y-0 left-0 rounded-full", answer.probability >= threshold ? "bg-rose-400" : "bg-cyan-300/70")}
+                    style={{ width: `${Math.max(answer.probability * 100, 2)}%` }}
+                  />
+                  <span className="absolute inset-y-[-3px] w-px bg-slate-300/70" style={{ left: `${threshold * 100}%` }} />
+                </span>
+                <span className="text-right tabular-nums text-slate-200">{formatPercent(answer.probability)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-slate-300">{verdict.thesis}</p>
+          <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">
+            {verdict.source === "llm" ? `AI model · ${verdict.model ?? "LLM"}` : "Built-in scorer"}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -716,6 +782,39 @@ export function DeskRulesForm({
           />
           Seed the Analyst&apos;s win-rate estimates with my tagged journal trades
         </label>
+      </div>
+
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Skeptic seat</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_1fr_2fr] sm:items-end">
+          <NumberField
+            label="Veto at probability"
+            value={config.seat_veto}
+            onChange={(v) => set("seat_veto", v)}
+            step={0.05}
+            min={0.3}
+            max={1}
+            hint="An order is vetoed when any of the four risk questions is answered at or above this probability. 1 turns vetoes off."
+          />
+          <NumberField
+            label="AI calls per run"
+            value={config.ai_seat_budget}
+            onChange={(v) => set("ai_seat_budget", v)}
+            step={1}
+            min={0}
+            max={30}
+            hint="Each sized order costs one model call until the budget runs out; the built-in scorer answers the rest."
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="accent-cyan-300"
+              checked={config.use_ai_seat}
+              onChange={(event) => set("use_ai_seat", event.target.checked)}
+            />
+            Ask the AI model when an LLM key is configured (adds a second or two per call). Otherwise the built-in scorer answers.
+          </label>
+        </div>
       </div>
 
       <div>
