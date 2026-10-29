@@ -6,6 +6,7 @@ import type {
   ChecklistTemplate,
   DeskConfig,
   DeskDataSourceInfo,
+  DeskLiveSession,
   DeskRun,
   DeskRunSummary,
   Profile,
@@ -192,6 +193,14 @@ export async function getDeskRunsFromBackend(): Promise<DeskRunSummary[]> {
 export async function getDeskRunFromBackend(runId: string): Promise<DeskRun | null> {
   try {
     return await getBackendJson<DeskRun>(`/api/v1/desk/runs/${encodeURIComponent(runId)}`, { cache: "no-store" });
+  } catch {
+    return null;
+  }
+}
+
+export async function getDeskLiveFromBackend(): Promise<DeskLiveSession | null> {
+  try {
+    return await getBackendJson<DeskLiveSession | null>("/api/v1/desk/live", { cache: "no-store" });
   } catch {
     return null;
   }

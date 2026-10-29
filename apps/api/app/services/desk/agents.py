@@ -68,6 +68,8 @@ KILL_LABELS: dict[str, str] = {
     "buying_power": "No buying power left",
     "flow_against": "Order flow against the trade",
     "seat_veto": "Skeptic seat veto",
+    "checkpoint_pause": "Paused at a checkpoint",
+    "desk_stopped": "Desk stopped for the day",
     "gap_stop": "Gapped through stop",
     "gap_target": "Gapped past target",
 }
@@ -253,6 +255,8 @@ class DeskGate:
     busy_symbols: set[str]
     working_count: int
     flow: float = 0.0
+    paused: bool = False
+    stopped: bool = False
 
 
 class FilterAgent:
@@ -268,8 +272,12 @@ class FilterAgent:
             return "opening_noise"
         if gate.bar_index >= gate.session_length - CLOSING_BELL_BARS:
             return "closing_bell"
+        if gate.stopped:
+            return "desk_stopped"
         if gate.halted:
             return "daily_loss_halt"
+        if gate.paused:
+            return "checkpoint_pause"
         if gate.step < gate.cooldown_until:
             return "tilt_cooldown"
         if setup.symbol in gate.busy_symbols:
@@ -472,6 +480,10 @@ class ExecutorAgent:
 
     def bell_exit(self, position: PaperPosition, bar: Bar) -> ExitFill:
         return ExitFill(price=bar.close * (1 - position.direction * self.slippage), reason="bell")
+
+    def stop_exit(self, position: PaperPosition, bar: Bar) -> ExitFill:
+        """The user stopped the desk: flatten at this bar's open."""
+        return ExitFill(price=bar.open * (1 - position.direction * self.slippage), reason="stopped")
 
     def trail(self, position: PaperPosition, bar: Bar) -> float | None:
         """Returns a tighter stop once the trade has run `trail_after_r`, else None."""

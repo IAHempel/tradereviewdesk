@@ -198,6 +198,9 @@ class HistoricalMarketFeed:
     def session_bars(self, symbol: str, session: int) -> list[Bar]:
         return self._tape[symbol][self.days[session]]
 
+    def session_length(self, session: int) -> int:
+        return session_bar_count(self.days[session])
+
     def session_flow(self, symbol: str, session: int) -> list[FlowSlot] | None:
         slots = self._flows.get(symbol, {}).get(self.days[session])
         if slots is None or len(slots) != len(self.session_bars(symbol, session)):

@@ -209,6 +209,16 @@ Set `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` (recommended) or `POLYGON_AP
 
 The agents only see `Bar` objects through the `MarketFeed` protocol in `market.py`, so another provider fits behind the same shape.
 
+### Live paper mode
+
+With Alpaca keys set, **Live paper session** on the Agent Desk runs today's market bar by bar from Alpaca's free real-time IEX feed. Fills are still paper; nothing reaches a broker.
+
+- **Recomputed, not stateful.** A live session stores its market data so far, a snapshot of its journal priors and AI seat verdicts, and your decisions. Every tick fetches only what is new and reruns the deterministic engine over the whole day, so earlier bars never change and a restart can't corrupt it. The previous trading day loads as indicator warmup.
+- **Keep-running checkpoints.** Each milestone crossed (Desk rules → Milestones) and one drawdown level (`checkpoint_drawdown_pct`) pause new entries. Open positions keep their stops. **Keep running** resumes entries from the next bar. **Stop for today** (any time) flattens at the next bar's open. Finished sessions are saved to run history.
+- **Notifications.** Paste an ntfy.sh topic (a free phone app), a Discord webhook, or a Slack incoming webhook when starting. Checkpoints, a daily-loss halt, and the close each send one message. Only those hosts are accepted. Browser alerts are available while the tab is open.
+- **Ticking.** Loading the desk ticks a session that has missed a bar. For updates and notifications with no browser open, run the worker: `python -m app.workers.desk_live_worker` (see `DEPLOYMENT_ENV_MATRIX.md`).
+- **Migration.** `0010_desk_live_sessions` adds the `desk_live_sessions` table.
+
 ## MVP coverage in this scaffold
 
 - monorepo structure

@@ -112,18 +112,21 @@ def fetch_trade_flow(
     day: date,
     *,
     client: httpx.Client,
+    start_at: datetime | None = None,
     end_at: datetime | None = None,
+    classifiers: dict[str, TickRuleClassifier] | None = None,
 ) -> dict[str, list[FlowSlot]]:
     """Buy and sell volume per 5-minute slot from trade prints, each classified by the tick rule.
 
     Uses the IEX feed by default: one venue's prints, a sample of the whole tape's flow,
-    but free and small enough to page through for a few symbols and days.
+    but free and small enough to page through for a few symbols and days. Live mode passes
+    `start_at` and its saved `classifiers` to continue where the previous tick stopped.
     """
     slot_count = session_bar_count(day)
     close_minutes = SESSION_OPEN_MINUTES + slot_count * BAR_MINUTES
     params: dict[str, str | int] = {
         "symbols": ",".join(symbols),
-        "start": _rfc3339(day, time(9, 30)),
+        "start": start_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if start_at else _rfc3339(day, time(9, 30)),
         "end": (
             end_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             if end_at
@@ -135,7 +138,10 @@ def fetch_trade_flow(
     }
     buys = {symbol: [0.0] * slot_count for symbol in symbols}
     sells = {symbol: [0.0] * slot_count for symbol in symbols}
-    classifiers = {symbol: TickRuleClassifier() for symbol in symbols}
+    if classifiers is None:
+        classifiers = {}
+    for symbol in symbols:
+        classifiers.setdefault(symbol, TickRuleClassifier())
 
     for _ in range(MAX_PAGES):
         payload = get_page("/v2/stocks/trades", params, client=client, what=f"trade prints for {', '.join(symbols)}")

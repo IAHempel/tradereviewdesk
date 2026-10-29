@@ -141,6 +141,21 @@ Copy into Railway to let the Agent Desk replay real historical bars from Alpaca:
 
 One request loads every symbol in a run, and the free plan allows 200 requests a minute. Completed days use the consolidated SIP feed, which the free plan serves once data is more than 15 minutes old.
 
+## Live desk worker (optional, recommended with Alpaca)
+
+Live paper sessions advance whenever someone has the Agent Desk open. To keep them moving (and send keep-running notifications) with no browser open, run a second Railway service from the same API image with this start command:
+
+```
+python -m app.workers.desk_live_worker
+```
+
+It needs the same environment as the API (database, Alpaca keys). It ticks every active live session every 30 seconds.
+
+| Variable | Recommended value | Notes |
+| --- | --- | --- |
+| `DESK_NOTIFY_EXTRA_HOSTS` | empty | Comma-separated extra hosts allowed for notification webhooks, for a self-hosted ntfy server. ntfy.sh, Discord, and Slack webhooks are always allowed. |
+| `DESK_LIVE_STALE_SECONDS` | `90` | How old a live session may get before a page load ticks it itself. |
+
 ## Polygon (optional)
 
 Copy into Railway to let the Agent Desk replay real historical bars:

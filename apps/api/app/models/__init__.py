@@ -1,6 +1,6 @@
 from app.models.audit_log import AuditLog
 from app.models.checklists import ChecklistRun, ChecklistRunItem, ChecklistTemplate, ChecklistTemplateItem
-from app.models.desk import DeskRun
+from app.models.desk import DeskLiveSession, DeskRun
 from app.models.report import Report, ReportJob
 from app.models.subscription import Subscription
 from app.models.trade import TradeEntry
@@ -12,6 +12,7 @@ __all__ = [
     "ChecklistRunItem",
     "ChecklistTemplate",
     "ChecklistTemplateItem",
+    "DeskLiveSession",
     "DeskRun",
     "Profile",
     "Report",

@@ -4,6 +4,7 @@ export {
   getChecklistRunsFromBackend as getChecklistRuns,
   getChecklistTemplatesFromBackend as getChecklistTemplates,
   getDeskDefaultsFromBackend as getDeskDefaults,
+  getDeskLiveFromBackend as getDeskLive,
   getDeskRunFromBackend as getDeskRun,
   getDeskRunsFromBackend as getDeskRuns,
   getDeskSourcesFromBackend as getDeskSources,

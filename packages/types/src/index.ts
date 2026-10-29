@@ -208,6 +208,7 @@ export interface DeskConfig {
   ai_seat_budget: number;
   seat_veto: number;
   milestones: number[];
+  checkpoint_drawdown_pct: number;
   seed: number | null;
 }
 
@@ -292,10 +293,23 @@ export interface DeskTrade {
   fees: number;
   pnl: number;
   r_multiple: number;
-  exit_reason: "stop" | "trail" | "target" | "bell";
+  exit_reason: "stop" | "trail" | "target" | "bell" | "stopped";
   score: number;
   win_probability: number;
   thesis: string;
+}
+
+export interface DeskCheckpoint {
+  index: number;
+  kind: "milestone" | "drawdown";
+  step: number;
+  session: number;
+  clock: string;
+  equity: number;
+  multiple: number;
+  message: string;
+  decision: "continue" | "stop" | null;
+  decided_step: number | null;
 }
 
 export interface DeskSeatAnswer {
@@ -393,6 +407,9 @@ export interface DeskRunSummary {
 
 export interface DeskRun extends DeskRunSummary {
   session_labels: string[];
+  /** Scheduled bars per session; a live session has fewer frames than this until the close. */
+  session_lengths: number[];
+  checkpoints: DeskCheckpoint[];
   pipeline: DeskPipelineCounts;
   setup_edges: DeskSetupEdge[];
   kill_reasons: DeskKillReason[];
@@ -405,4 +422,22 @@ export interface DeskRun extends DeskRunSummary {
   seat_verdicts: DeskSeatVerdict[];
   /** Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`. */
   tape: Record<string, number[][]>;
+}
+
+export type DeskLiveStatus = "scheduled" | "running" | "awaiting_decision" | "stopping" | "stopped" | "closed" | "error";
+
+export interface DeskLiveSession {
+  id: string;
+  created_at: string;
+  status: DeskLiveStatus;
+  session_date: string;
+  config: DeskConfig;
+  last_tick_at: string | null;
+  next_bar_at: string | null;
+  message: string | null;
+  notify_channel: "ntfy" | "discord" | "slack" | null;
+  notify_error: string | null;
+  open_checkpoint: DeskCheckpoint | null;
+  run_id: string | null;
+  result: DeskRun | null;
 }

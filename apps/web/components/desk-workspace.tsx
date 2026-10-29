@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
-import type { DeskConfig, DeskDataSourceInfo, DeskRun, DeskRunSummary } from "@tradenoc/types";
+import type { DeskConfig, DeskDataSourceInfo, DeskLiveSession, DeskRun, DeskRunSummary } from "@tradenoc/types";
 import { Card } from "@tradenoc/ui";
 import { EquityChart, KillReasonBars, MonteCarloFan, ScoutRadar } from "@/components/desk-charts";
+import { LIVE_ACTIVE, LiveBar, LiveControl, useLiveSession } from "@/components/desk-live";
 import { AgentCards, AlertBanner, CandlestickChart, MilestoneLadder, TickerStrip } from "@/components/desk-visuals";
 import {
   ActivityFeed,
@@ -75,16 +76,26 @@ export function DeskWorkspace({
   runs: initialRuns,
   sources,
   initialRun,
+  initialLive,
+  preferLive,
 }: {
   defaults: DeskConfig | null;
   runs: DeskRunSummary[];
   sources: DeskDataSourceInfo[];
   initialRun: DeskRun | null;
+  initialLive: DeskLiveSession | null;
+  preferLive: boolean;
 }) {
   const [config, setConfig] = useState<DeskConfig>(() => ({ ...(initialRun?.config ?? defaults ?? FALLBACK_DESK_CONFIG), seed: null }));
   const [runs, setRuns] = useState(initialRuns);
-  const [run, setRun] = useState<DeskRun | null>(initialRun);
-  const [step, setStep] = useState(() => (initialRun ? initialRun.frames.length - 1 : 0));
+  const [savedRun, setSavedRun] = useState<DeskRun | null>(initialRun);
+  const session = useLiveSession(initialLive);
+  const [viewingLive, setViewingLive] = useState(
+    () => preferLive && initialLive !== null && LIVE_ACTIVE.includes(initialLive.status) && Boolean(initialLive.result?.frames.length),
+  );
+  const liveResult = session.live?.result ?? null;
+  const run = viewingLive && liveResult?.frames.length ? liveResult : savedRun;
+  const [step, setStep] = useState(() => (run ? run.frames.length - 1 : 0));
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(SPEEDS[0].bars);
   const [rulesOpen, setRulesOpen] = useState(!initialRun);
@@ -111,6 +122,45 @@ export function DeskWorkspace({
   }, [playing, step, lastStep]);
 
   const view = useMemo(() => (run ? deriveView(run, step) : null), [run, step]);
+
+  // In live view, each newly closed bar animates in when the desk was already showing the latest one.
+  const liveFrames = liveResult?.frames.length ?? 0;
+  const seenLiveFrames = useRef(liveFrames);
+  useEffect(() => {
+    const previous = seenLiveFrames.current;
+    seenLiveFrames.current = liveFrames;
+    if (!viewingLive || liveFrames === 0 || liveFrames <= previous) {
+      return;
+    }
+    setStep((current) => {
+      if (previous > 0 && current >= previous - 1) {
+        setPlaying(true);
+        return previous - 1;
+      }
+      return current;
+    });
+  }, [liveFrames, viewingLive]);
+
+  function showLive() {
+    if (!liveResult?.frames.length) {
+      return;
+    }
+    setViewingLive(true);
+    setPlaying(false);
+    setStep(liveResult.frames.length - 1);
+  }
+
+  // Follow a live session the moment one is started from this page.
+  const followedLiveId = useRef(initialLive?.id ?? null);
+  useEffect(() => {
+    const id = session.live?.id ?? null;
+    if (id && id !== followedLiveId.current) {
+      followedLiveId.current = id;
+      setViewingLive(true);
+      setPlaying(false);
+      setStep(Math.max((session.live?.result?.frames.length ?? 1) - 1, 0));
+    }
+  }, [session.live]);
 
   function rememberRun(runId: string) {
     const url = new URL(window.location.href);
@@ -141,7 +191,8 @@ export function DeskWorkspace({
         setError(detail || "The desk could not run. Check that the API is reachable.");
         return;
       }
-      setRun(data);
+      setSavedRun(data);
+      setViewingLive(false);
       setRuns((current) => [summarySkeleton(data), ...current.filter((item) => item.id !== data.id)]);
       setStep(0);
       setPlaying(true);
@@ -155,7 +206,7 @@ export function DeskWorkspace({
   }
 
   async function openRun(runId: string) {
-    if (runId === run?.id) {
+    if (runId === run?.id && !viewingLive) {
       return;
     }
     setError(null);
@@ -167,7 +218,8 @@ export function DeskWorkspace({
         return;
       }
       const data = (await response.json()) as DeskRun;
-      setRun(data);
+      setSavedRun(data);
+      setViewingLive(false);
       setPlaying(false);
       setStep(data.frames.length - 1);
       setConfig({ ...data.config, seed: null });
@@ -189,7 +241,17 @@ export function DeskWorkspace({
   const { whole, cents } = splitMoney(balance);
   const pnlTone = view ? toneFor(view.pnl) : "flat";
   const sessionCount = run?.config.sessions ?? config.sessions;
-  const statusLabel = !run ? "Idle" : playing ? "Live replay" : view?.isComplete ? "Session closed" : "Paused";
+  const statusLabel = viewingLive
+    ? session.live?.status === "running"
+      ? "Live"
+      : "Live session"
+    : !run
+      ? "Idle"
+      : playing
+        ? "Live replay"
+        : view?.isComplete
+          ? "Session closed"
+          : "Paused";
   const replayRange = run ? replayRangeLabel(run) : null;
   const tapeLabel = run
     ? `${TAPE_LABELS[run.data_source]}${replayRange ? ` · ${replayRange}` : ""}`
@@ -252,6 +314,15 @@ export function DeskWorkspace({
         ) : null}
       </Card>
 
+      <LiveControl
+        live={session.live}
+        available={sources.some((source) => source.id === "alpaca" && source.available)}
+        config={config}
+        session={session}
+        viewingLive={viewingLive}
+        onView={showLive}
+      />
+
       <section
         className="relative overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(52,211,153,0.16),transparent_45%),radial-gradient(circle_at_90%_10%,rgba(103,232,249,0.14),transparent_40%),linear-gradient(180deg,#0b1424,#050a14)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.55)]"
         aria-label="Agent desk console"
@@ -272,7 +343,15 @@ export function DeskWorkspace({
           </p>
         </div>
 
-        {run && view ? (
+        {viewingLive && session.live && view ? (
+          <LiveBar
+            live={session.live}
+            onReplay={() => {
+              setStep(0);
+              setPlaying(true);
+            }}
+          />
+        ) : run && view ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5">
           <button
             type="button"
@@ -414,6 +493,7 @@ export function DeskWorkspace({
               startingBalance={run.summary.starting_balance}
               trades={view.closedTrades}
               sessionMarker={(session) => shortSessionLabel(run, session)}
+              totalSteps={run.session_lengths?.reduce((total, length) => total + length, 0) || run.frames.length}
             />
           </div>
         ) : (

@@ -232,6 +232,7 @@ const exitLabels: Record<DeskTrade["exit_reason"], string> = {
   trail: "trailed stop",
   target: "target",
   bell: "flat at bell",
+  stopped: "you stopped the desk",
 };
 
 export function ClosedTradesPanel({ trades, wins, losses }: { trades: DeskTrade[]; wins: number; losses: number }) {

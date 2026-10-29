@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.core.auth import LOCAL_DEMO_AUTH_PROVIDER_ID
 from app.schemas.checklists import ChecklistRunResponse, ChecklistTemplateResponse
-from app.schemas.desk import DeskRunResponse
+from app.schemas.desk import DESK_LIVE_ACTIVE_STATUSES, DeskLiveSessionRecord, DeskRunResponse
 from app.schemas.profile import ProfileResponse, ProfileUpdate
 from app.schemas.reports import ReportResponse
 from app.schemas.trades import TradeEntryResponse
@@ -206,6 +206,44 @@ def save_desk_runs(items: list[DeskRunResponse], current_user: "CurrentUser | No
         return items
 
     return _with_state(mutator)
+
+
+def list_desk_live_sessions(current_user: "CurrentUser | None" = None) -> list[DeskLiveSessionRecord]:
+    return _read(
+        lambda state: [
+            DeskLiveSessionRecord.model_validate(item)
+            for item in _get_scoped_state(state, current_user).get("desk_live_sessions", [])
+        ]
+    )
+
+
+def save_desk_live_sessions(
+    items: list[DeskLiveSessionRecord], current_user: "CurrentUser | None" = None
+) -> list[DeskLiveSessionRecord]:
+    def mutator(state: dict[str, Any]) -> list[DeskLiveSessionRecord]:
+        scoped_state = _get_scoped_state(state, current_user)
+        scoped_state["desk_live_sessions"] = [item.model_dump(mode="json") for item in items]
+        return items
+
+    return _with_state(mutator)
+
+
+def desk_live_session_owners() -> list[tuple[str | None, str]]:
+    """(auth provider id, or None for the legacy demo user; email) for each user with an active live session."""
+
+    def has_active(bucket: dict[str, Any]) -> bool:
+        return any(item.get("status") in DESK_LIVE_ACTIVE_STATUSES for item in bucket.get("desk_live_sessions", []))
+
+    def mapper(state: dict[str, Any]) -> list[tuple[str | None, str]]:
+        owners: list[tuple[str | None, str]] = []
+        if has_active(state):
+            owners.append((None, state["profile"]["email"]))
+        for auth_provider_id, bucket in state.get("user_state", {}).items():
+            if has_active(bucket):
+                owners.append((auth_provider_id, bucket["profile"]["email"]))
+        return owners
+
+    return _read(mapper)
 
 
 def reset_state_from_seed() -> None:

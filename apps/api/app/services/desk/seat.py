@@ -169,14 +169,43 @@ class SeatReview:
 
 
 class SkepticSeat:
-    def __init__(self, config: DeskConfig, provider: ReportGenerationProvider | None = None) -> None:
+    """Reviews sized orders. A live session passes `cache` so recomputing the day reuses earlier verdicts:
+    the model is never asked twice about the same order, and its answers can't change history."""
+
+    def __init__(
+        self,
+        config: DeskConfig,
+        provider: ReportGenerationProvider | None = None,
+        cache: dict[str, dict] | None = None,
+    ) -> None:
         self.provider = provider or report_generation_provider
-        self.ai_calls_left = config.ai_seat_budget if config.use_ai_seat and self.provider.is_live_configured else 0
+        self.cache = cache
+        already_called = sum(1 for item in (cache or {}).values() if item.get("called"))
+        enabled = config.use_ai_seat and self.provider.is_live_configured
+        self.ai_calls_left = max(0, config.ai_seat_budget - already_called) if enabled else 0
         self.ai_calls = 0
 
-    def review(self, context: SeatContext) -> SeatReview:
+    def review(self, context: SeatContext, key: str | None = None) -> SeatReview:
+        if self.cache is not None and key is not None and key in self.cache:
+            cached = self.cache[key]
+            if cached.get("called"):
+                self.ai_calls += 1
+            return SeatReview(SeatOutput.model_validate(cached["output"]), cached["source"], cached.get("model"), cached.get("note"))
+
+        review, called = self._answer(context)
+        if self.cache is not None and key is not None:
+            self.cache[key] = {
+                "output": review.output.model_dump(),
+                "source": review.source,
+                "model": review.model,
+                "note": review.note,
+                "called": called,
+            }
+        return review
+
+    def _answer(self, context: SeatContext) -> tuple[SeatReview, bool]:
         if self.ai_calls_left <= 0:
-            return SeatReview(heuristic_verdict(context), "heuristic", None, None)
+            return SeatReview(heuristic_verdict(context), "heuristic", None, None), False
 
         self.ai_calls_left -= 1
         self.ai_calls += 1
@@ -188,5 +217,5 @@ class SkepticSeat:
         except (ValidationError, ValueError):
             note = "AI seat's answer failed validation; the built-in scorer answered."
         else:
-            return SeatReview(output, "llm", settings.llm_model_name, None)
-        return SeatReview(heuristic_verdict(context), "heuristic", None, note)
+            return SeatReview(output, "llm", settings.llm_model_name, None), True
+        return SeatReview(heuristic_verdict(context), "heuristic", None, note), True

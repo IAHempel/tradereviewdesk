@@ -1,7 +1,9 @@
 """Runs a paper desk session: the six agents stepping bar by bar over a synthetic tape."""
 
 import secrets
+from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Literal
 
 import httpx
 
@@ -9,6 +11,7 @@ from app.schemas.desk import (
     DESK_DISCLAIMER,
     HISTORICAL_DESK_DISCLAIMER,
     DeskAgent,
+    DeskCheckpoint,
     DeskConfig,
     DeskFrame,
     DeskKillReason,
@@ -95,11 +98,42 @@ def journal_counts(trades: list[TradeEntryResponse]) -> dict[DeskSetup, tuple[in
     return {setup: (tally[0], tally[1]) for setup, tally in tallies.items()}
 
 
+@dataclass(frozen=True)
+class CheckpointDecision:
+    decision: Literal["continue", "stop"]
+    # The last completed bar when the user decided; the decision takes effect from the next bar.
+    step: int
+
+
+@dataclass
+class CheckpointPolicy:
+    """Live mode's keep-running checkpoints: each milestone crossed, and one drawdown level, pause new entries."""
+
+    milestones: list[float]
+    drawdown_pct: float
+    decisions: dict[int, CheckpointDecision] = field(default_factory=dict)
+    # Stop at any time, without a checkpoint: takes effect from the bar after this step.
+    manual_stop_step: int | None = None
+
+
 class DeskSession:
-    def __init__(self, config: DeskConfig, journal: dict[DeskSetup, tuple[int, int]], feed: MarketFeed) -> None:
+    def __init__(
+        self,
+        config: DeskConfig,
+        journal: dict[DeskSetup, tuple[int, int]],
+        feed: MarketFeed,
+        checkpoint_policy: CheckpointPolicy | None = None,
+        seat_cache: dict[str, dict] | None = None,
+    ) -> None:
         assert config.seed is not None and config.symbols, "resolve_config must run first"
         self.config = config
         self.feed = feed
+        self.checkpoint_policy = checkpoint_policy
+        self.checkpoints: list[DeskCheckpoint] = []
+        self.open_checkpoint: DeskCheckpoint | None = None
+        self.next_milestone = 0
+        self.drawdown_checkpoint_hit = False
+        self.stopped = False
         self.tapes = {symbol: SymbolTape(symbol) for symbol in config.symbols}
         self.flow_memory = {symbol: FlowMemory() for symbol in config.symbols}
         self.flow: dict[str, float] = {symbol: 0.0 for symbol in config.symbols}
@@ -108,7 +142,7 @@ class DeskSession:
         self.analyst = AnalystAgent(config, journal)
         self.risk = RiskAgent(config)
         self.executor = ExecutorAgent(config)
-        self.seat = SkepticSeat(config)
+        self.seat = SkepticSeat(config, cache=seat_cache)
         self.logger = LoggerAgent()
         self.seat_verdicts: list[DeskSeatVerdict] = []
         self.tape: dict[str, list[list[float]]] = {symbol: [] for symbol in config.symbols}
@@ -180,17 +214,20 @@ class DeskSession:
         session_flow = {symbol: self.feed.session_flow(symbol, session) for symbol in self.config.symbols}
         for memory in self.flow_memory.values():
             memory.reset()
-        # Sessions vary in length on real data (1:00 pm early closes); every symbol is aligned to the same slots.
-        self.session_length = len(session_bars[self.config.symbols[0]])
+        # Sessions vary in length on real data (1:00 pm early closes), and a live session has only the bars
+        # completed so far; every symbol is aligned to the same slots.
+        self.session_length = self.feed.session_length(session)
+        available = len(session_bars[self.config.symbols[0]])
         first_step = len(self.frames)
         day_start_equity = self.config.starting_balance + self.realized
 
-        for index in range(self.session_length):
+        for index in range(available):
             self.step = first_step + index
             self.clock = bar_clock(index)
             bars = {symbol: session_bars[symbol][index] for symbol in self.config.symbols}
             marks = {symbol: bar.close for symbol, bar in bars.items()}
 
+            self.resolve_checkpoint(bars)
             self.fill_orders(bars)
             self.manage_positions(bars, is_last_bar=index == self.session_length - 1)
             for symbol, bar in bars.items():
@@ -209,9 +246,87 @@ class DeskSession:
                     f"Day P&L {day_pnl:+.2f} breached the {self.config.max_daily_loss_pct:g}% daily loss limit. "
                     "No new entries for the rest of the session; open stops stay in place.",
                 )
+            self.trigger_checkpoint(marks, day_start_equity)
 
             scans = self.scan(index, marks) if index < self.session_length - 1 else []
             self.frames.append(self.frame(marks, scans))
+
+    def resolve_checkpoint(self, bars: dict[str, Bar]) -> None:
+        """Applies the user's decisions from the bar after they made them."""
+        policy = self.checkpoint_policy
+        if policy is None or self.stopped:
+            return
+
+        checkpoint = self.open_checkpoint
+        if checkpoint is not None:
+            decision = policy.decisions.get(checkpoint.index)
+            if decision is not None and self.step > max(decision.step, checkpoint.step):
+                checkpoint.decision = decision.decision
+                checkpoint.decided_step = max(decision.step, checkpoint.step)
+                self.open_checkpoint = None
+                if decision.decision == "stop":
+                    self.stop_desk(bars, f"You stopped the desk at checkpoint {checkpoint.index + 1}.")
+                    return
+                self.log("risk", "resume", f"You chose to keep running after checkpoint {checkpoint.index + 1}. Entries resume.")
+
+        if policy.manual_stop_step is not None and self.step > policy.manual_stop_step:
+            self.stop_desk(bars, "You stopped the desk.")
+
+    def stop_desk(self, bars: dict[str, Bar], reason: str) -> None:
+        self.stopped = True
+        self.open_checkpoint = None
+        for symbol in list(self.orders):
+            del self.orders[symbol]
+            self.logger.counts.executor_cancels += 1
+            self.log("executor", "cancel", "Pending paper order cancelled: the desk was stopped.", symbol)
+        for position in list(self.positions.values()):
+            self.close_position(position, self.executor.stop_exit(position, bars[position.order.setup.symbol]))
+        self.log("risk", "stopped", f"{reason} Flat at this bar's open; no new entries today.")
+
+    def trigger_checkpoint(self, marks: dict[str, float], day_start_equity: float) -> None:
+        """Opens a keep-running checkpoint when equity crosses the next milestone or the drawdown level."""
+        policy = self.checkpoint_policy
+        if policy is None or self.stopped or self.open_checkpoint is not None:
+            return
+
+        equity = self.equity(marks)
+        multiple = equity / self.config.starting_balance
+        kind: Literal["milestone", "drawdown"] | None = None
+        while self.next_milestone < len(policy.milestones) and multiple >= policy.milestones[self.next_milestone]:
+            kind = "milestone"
+            reached = policy.milestones[self.next_milestone]
+            self.next_milestone += 1
+        day_pnl = equity - day_start_equity
+        if kind is None and not self.drawdown_checkpoint_hit and day_pnl <= -day_start_equity * policy.drawdown_pct / 100:
+            kind = "drawdown"
+            self.drawdown_checkpoint_hit = True
+        if kind is None:
+            return
+
+        change = equity - self.config.starting_balance
+        if kind == "milestone":
+            message = (
+                f"Reached the {reached}× milestone: {change:+.2f} ({(multiple - 1) * 100:+.2f}%). "
+                "New entries are paused until you choose to keep running or stop."
+            )
+        else:
+            message = (
+                f"Down {day_pnl:+.2f} today ({day_pnl / day_start_equity * 100:+.2f}%), past the "
+                f"{policy.drawdown_pct:g}% checkpoint. New entries are paused until you choose to keep running or stop."
+            )
+        checkpoint = DeskCheckpoint(
+            index=len(self.checkpoints),
+            kind=kind,
+            step=self.step,
+            session=self.session,
+            clock=self.clock,
+            equity=round(equity, 2),
+            multiple=round(multiple, 4),
+            message=message,
+        )
+        self.checkpoints.append(checkpoint)
+        self.open_checkpoint = checkpoint
+        self.log("risk", "checkpoint", message)
 
     def fill_orders(self, bars: dict[str, Bar]) -> None:
         for symbol, order in list(self.orders.items()):
@@ -373,6 +488,8 @@ class DeskSession:
                     busy_symbols=set(self.positions) | set(self.orders),
                     working_count=len(self.positions) + len(self.orders),
                     flow=self.flow[symbol],
+                    paused=self.open_checkpoint is not None,
+                    stopped=self.stopped,
                 )
                 kill = self.filter.review(setup, gate)
                 if kill is not None:
@@ -433,7 +550,10 @@ class DeskSession:
                     symbol,
                 )
 
-                review = self.seat.review(build_context(setup, self.tapes[symbol], self.flow[symbol], self.clock))
+                review = self.seat.review(
+                    build_context(setup, self.tapes[symbol], self.flow[symbol], self.clock),
+                    key=f"{self.step}:{symbol}:{setup.setup}:{setup.side}",
+                )
                 self.logger.counts.seat_reviews += 1
                 self.logger.counts.seat_ai_calls = self.seat.ai_calls
                 if review.note:
@@ -580,6 +700,8 @@ class DeskSession:
             config=self.config,
             summary=summary,
             session_labels=self.feed.session_labels,
+            session_lengths=[self.feed.session_length(session) for session in range(1, self.config.sessions + 1)],
+            checkpoints=self.checkpoints,
             pipeline=pipeline,
             setup_edges=setup_edges,
             kill_reasons=kill_reasons,

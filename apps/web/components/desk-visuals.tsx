@@ -15,7 +15,7 @@ import {
   type DeskView,
 } from "@/lib/desk";
 
-const ALERT_KINDS = new Set(["veto", "halt", "cooldown"]);
+const ALERT_KINDS = new Set(["veto", "halt", "cooldown", "checkpoint", "stopped"]);
 const ALERT_WINDOW_BARS = 6;
 const SPARK_BARS = 40;
 
@@ -30,7 +30,8 @@ function sessionWindow(run: DeskRun, step: number): { start: number; end: number
   while (end < run.frames.length - 1 && run.frames[end + 1].session === session) {
     end += 1;
   }
-  return { start, end, length: end - start + 1 };
+  const scheduled = run.session_lengths?.[session - 1] ?? 0;
+  return { start, end, length: Math.max(end - start + 1, scheduled) };
 }
 
 /** One row of live numbers across the top of the console, like a terminal ticker. */

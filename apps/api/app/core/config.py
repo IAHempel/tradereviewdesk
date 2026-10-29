@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     alpaca_flow_feed: str = "iex"
     alpaca_request_timeout_seconds: float = 20.0
     market_data_cache_dir: str = ""
+    desk_notify_extra_hosts: str = ""
+    desk_live_stale_seconds: int = 90
     stripe_secret_key: str = "sk_test_placeholder"
     stripe_webhook_secret: str = "whsec_placeholder"
     stripe_price_id_pro: str = "price_pro_placeholder"

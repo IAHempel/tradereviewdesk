@@ -57,6 +57,10 @@ class MarketFeed(Protocol):
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]: ...
 
+    def session_length(self, session: int) -> int:
+        """Scheduled bars in the session; more than `session_bars` returns while a live session is in progress."""
+        ...
+
     def session_flow(self, symbol: str, session: int) -> list | None: ...
 
 
@@ -90,6 +94,9 @@ class SimulatedMarketFeed:
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]:
         return self._tape[symbol][session]
+
+    def session_length(self, session: int) -> int:
+        return BARS_PER_SESSION
 
     def session_flow(self, symbol: str, session: int) -> None:
         return None

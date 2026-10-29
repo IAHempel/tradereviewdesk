@@ -86,8 +86,13 @@ class FakeAlpaca:
         self.requests: list[httpx.Request] = []
         self.status_override: tuple[int, dict] | None = None
         self.trades_status: tuple[int, dict] | None = None
+        self.posts: list[httpx.Request] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            # Notification webhooks share the client in live mode; record them separately.
+            self.posts.append(request)
+            return httpx.Response(200)
         self.requests.append(request)
         if self.status_override:
             status, body = self.status_override

@@ -25,12 +25,15 @@ export function EquityChart({
   startingBalance,
   trades,
   sessionMarker,
+  totalSteps,
 }: {
   frames: DeskFrame[];
   currentIndex: number;
   startingBalance: number;
   trades: DeskTrade[];
   sessionMarker: (session: number) => string;
+  /** Scheduled bars in the whole run; a live session leaves room for the bars still to come. */
+  totalSteps?: number;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const visible = frames.slice(0, currentIndex + 1);
@@ -40,7 +43,7 @@ export function EquityChart({
   const padding = Math.max((rawMax - rawMin) * 0.15, startingBalance * 0.002);
   const yMin = rawMin - padding;
   const yMax = rawMax + padding;
-  const lastIndex = Math.max(frames.length - 1, 1);
+  const lastIndex = Math.max((totalSteps ?? frames.length) - 1, frames.length - 1, 1);
 
   const x = (index: number) => (index / lastIndex) * VIEW_WIDTH;
   const y = (value: number) => VIEW_HEIGHT - ((value - yMin) / (yMax - yMin)) * VIEW_HEIGHT;

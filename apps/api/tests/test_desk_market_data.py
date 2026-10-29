@@ -6,7 +6,6 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
 from fastapi.testclient import TestClient
 
 API_ROOT = Path(__file__).resolve().parents[1]

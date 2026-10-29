@@ -8,7 +8,7 @@ DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversi
 DeskDataSource = Literal["synthetic", "polygon", "alpaca"]
 DeskAgent = Literal["scout", "flow", "filter", "analyst", "risk", "seat", "executor", "logger"]
 DeskSide = Literal["long", "short"]
-DeskExitReason = Literal["stop", "trail", "target", "bell"]
+DeskExitReason = Literal["stop", "trail", "target", "bell", "stopped"]
 DeskScanStatus = Literal["killed", "ordered"]
 
 DESK_SETUPS: tuple[DeskSetup, ...] = ("breakout", "sweep_reclaim", "trend_pullback", "mean_reversion")
@@ -48,6 +48,7 @@ class DeskConfig(BaseModel):
     ai_seat_budget: int = Field(default=8, ge=0, le=30)
     seat_veto: float = Field(default=0.7, ge=0.3, le=1.0)
     milestones: list[float] = Field(default_factory=lambda: [1.01, 1.02, 1.05, 1.1], max_length=6)
+    checkpoint_drawdown_pct: float = Field(default=1.5, ge=0.25, le=10)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
     @field_validator("symbols")
@@ -187,6 +188,19 @@ class DeskSeatVerdict(BaseModel):
     vetoed: bool
 
 
+class DeskCheckpoint(BaseModel):
+    index: int
+    kind: Literal["milestone", "drawdown"]
+    step: int
+    session: int
+    clock: str
+    equity: float
+    multiple: float
+    message: str
+    decision: Literal["continue", "stop"] | None = None
+    decided_step: int | None = None
+
+
 class DeskSetupEdge(BaseModel):
     setup: DeskSetup
     enabled: bool
@@ -267,6 +281,9 @@ class DeskRunSummaryResponse(BaseModel):
 
 class DeskRunResponse(DeskRunSummaryResponse):
     session_labels: list[str] = Field(default_factory=list)
+    # Scheduled bars per session; a live session has fewer frames than this until the close.
+    session_lengths: list[int] = Field(default_factory=list)
+    checkpoints: list[DeskCheckpoint] = Field(default_factory=list)
     pipeline: DeskPipelineCounts
     setup_edges: list[DeskSetupEdge]
     kill_reasons: list[DeskKillReason]
@@ -279,3 +296,52 @@ class DeskRunResponse(DeskRunSummaryResponse):
     # Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`.
     tape: dict[str, list[list[float]]] = Field(default_factory=dict)
     disclaimer: str = DESK_DISCLAIMER
+
+
+DeskLiveStatus = Literal["scheduled", "running", "awaiting_decision", "stopping", "stopped", "closed", "error"]
+DESK_LIVE_ACTIVE_STATUSES: tuple[DeskLiveStatus, ...] = ("scheduled", "running", "awaiting_decision", "stopping")
+
+
+class DeskLiveStartRequest(DeskConfig):
+    notify_url: str | None = Field(default=None, max_length=500)
+
+
+class DeskLiveDecisionRequest(BaseModel):
+    checkpoint: int = Field(ge=0)
+    decision: Literal["continue", "stop"]
+
+
+class DeskLiveSessionRecord(BaseModel):
+    """Everything a live session needs to be recomputed from scratch on any tick."""
+
+    id: str
+    created_at: str
+    status: DeskLiveStatus
+    session_date: date
+    config: DeskConfig
+    market_state: dict = Field(default_factory=dict)
+    decisions: dict[str, dict] = Field(default_factory=dict)
+    manual_stop_step: int | None = None
+    result: DeskRunResponse | None = None
+    notify_url: str | None = None
+    notified: list[str] = Field(default_factory=list)
+    notify_error: str | None = None
+    message: str | None = None
+    last_tick_at: str | None = None
+    run_id: str | None = None
+
+
+class DeskLiveSessionResponse(BaseModel):
+    id: str
+    created_at: str
+    status: DeskLiveStatus
+    session_date: date
+    config: DeskConfig
+    last_tick_at: str | None = None
+    next_bar_at: str | None = None
+    message: str | None = None
+    notify_channel: str | None = None
+    notify_error: str | None = None
+    open_checkpoint: DeskCheckpoint | None = None
+    run_id: str | None = None
+    result: DeskRunResponse | None = None
