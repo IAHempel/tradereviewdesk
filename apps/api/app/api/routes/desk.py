@@ -4,11 +4,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import CurrentUser, require_current_user
+from app.core.config import settings
 from app.core.persistence import require_database_result, use_file_persistence
-from app.schemas.desk import DeskConfig, DeskRunResponse, DeskRunSummaryResponse
+from app.schemas.desk import DeskConfig, DeskDataSourceInfo, DeskRunResponse, DeskRunSummaryResponse
 from app.schemas.trades import TradeEntryResponse
 from app.services import desk_repository, state_store, trade_repository, watchlist_repository
 from app.services.desk.engine import resolve_config, run_desk_session
+from app.services.desk.market import MarketDataError
 
 router = APIRouter()
 
@@ -40,6 +42,28 @@ def get_desk_defaults(current_user: CurrentUser = Depends(require_current_user))
     return resolved.model_copy(update={"seed": None})
 
 
+@router.get("/sources", response_model=list[DeskDataSourceInfo])
+def list_desk_sources(current_user: CurrentUser = Depends(require_current_user)) -> list[DeskDataSourceInfo]:
+    return [
+        DeskDataSourceInfo(
+            id="synthetic",
+            label="Synthetic tape",
+            available=True,
+            detail="Seeded random market with no edge built in. Good for stress-testing rules.",
+        ),
+        DeskDataSourceInfo(
+            id="polygon",
+            label="Polygon historical",
+            available=settings.is_polygon_configured,
+            detail=(
+                "Real 5-minute bars for completed sessions, cached after the first load."
+                if settings.is_polygon_configured
+                else "Set POLYGON_API_KEY on the API to replay real historical bars."
+            ),
+        ),
+    ]
+
+
 @router.get("/runs", response_model=list[DeskRunSummaryResponse])
 def list_desk_runs(current_user: CurrentUser = Depends(require_current_user)) -> list[DeskRunSummaryResponse]:
     if use_file_persistence():
@@ -59,11 +83,14 @@ def create_desk_run(
     payload: DeskConfig,
     current_user: CurrentUser = Depends(require_current_user),
 ) -> DeskRunResponse:
-    result = run_desk_session(
-        payload,
-        watchlist_symbols=_watchlist_symbols(current_user),
-        journal_trades=_journal_trades(current_user),
-    )
+    try:
+        result = run_desk_session(
+            payload,
+            watchlist_symbols=_watchlist_symbols(current_user),
+            journal_trades=_journal_trades(current_user),
+        )
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     if use_file_persistence():
         run = result.model_copy(update={"id": str(uuid4()), "created_at": datetime.now(UTC).isoformat()})

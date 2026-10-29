@@ -6,6 +6,7 @@ export {
   getDeskDefaultsFromBackend as getDeskDefaults,
   getDeskRunFromBackend as getDeskRun,
   getDeskRunsFromBackend as getDeskRuns,
+  getDeskSourcesFromBackend as getDeskSources,
   getProfileFromBackend as getProfile,
   getReportsFromBackend as getReports,
   getTradesFromBackend as getTrades,

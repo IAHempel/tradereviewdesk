@@ -197,7 +197,8 @@ class DeskApiTests(unittest.TestCase):
         self.assertEqual(run["mode"], "paper")
         self.assertEqual(run["data_source"], "synthetic")
         self.assertEqual(run["config"]["seed"], 5)
-        self.assertEqual(len(run["frames"]), 2 * run["bars_per_session"])
+        self.assertEqual(run["session_labels"], ["Session 1", "Session 2"])
+        self.assertEqual(len(run["frames"]), 2 * BARS_PER_SESSION)
 
         listed = self.client.get("/api/v1/desk/runs", headers=headers).json()
         self.assertEqual([item["id"] for item in listed], [run["id"]])

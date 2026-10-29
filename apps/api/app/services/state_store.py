@@ -202,7 +202,7 @@ def list_desk_runs(current_user: "CurrentUser | None" = None) -> list[DeskRunRes
 def save_desk_runs(items: list[DeskRunResponse], current_user: "CurrentUser | None" = None) -> list[DeskRunResponse]:
     def mutator(state: dict[str, Any]) -> list[DeskRunResponse]:
         scoped_state = _get_scoped_state(state, current_user)
-        scoped_state["desk_runs"] = [item.model_dump() for item in items]
+        scoped_state["desk_runs"] = [item.model_dump(mode="json") for item in items]
         return items
 
     return _with_state(mutator)

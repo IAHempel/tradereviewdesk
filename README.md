@@ -16,7 +16,7 @@ TradeReviewDesk is an AI-powered workflow platform for self-directed traders. Th
 
 TradeReviewDesk is not a signal service, not a brokerage, and not an auto-execution tool. The UI and API scaffolds intentionally frame outputs as workflow support, review assistance, and process discipline.
 
-The Agent Desk (below) keeps that boundary: it rehearses your rules on a synthetic tape with paper fills and has no path to a broker.
+The Agent Desk (below) keeps that boundary: it rehearses your rules with paper fills, on a synthetic tape or real historical bars, and has no path to a broker.
 
 ## Quick start
 
@@ -185,7 +185,7 @@ For any hosted environment, use absolute HTTPS URLs and configure the web and AP
 
 What makes it honest rather than a screenshot generator:
 
-- **Synthetic tape, no edge baked in.** `apps/api/app/services/desk/market.py` is a seeded regime-switching random walk with intraday volatility and rare gaps. Results show how your rules behave in noise, not what they would earn.
+- **Two tapes.** The synthetic tape (`apps/api/app/services/desk/market.py`) is a seeded regime-switching random walk with no edge baked in, so results show how your rules behave in noise. The Polygon tape replays real split-adjusted 5-minute bars for completed sessions (see below).
 - **No lookahead.** Setups are detected on a closed bar and filled at the next open; tests assert it.
 - **Stops never widen.** The "stops widened" stat is audited per trade, not hard-coded.
 - **Deterministic.** Same seed and rules give the identical run, so sessions can be replayed and compared.
@@ -193,7 +193,20 @@ What makes it honest rather than a screenshot generator:
 
 API: `GET /api/v1/desk/defaults`, `POST /api/v1/desk/runs`, `GET /api/v1/desk/runs`, `GET /api/v1/desk/runs/{id}`. Runs persist in the `desk_runs` table (migration `0009_desk_runs`), or in the JSON store in file mode (last 5 per user).
 
-Plugging in real data later means implementing the `SimulatedMarketFeed.session_bars(symbol, session)` shape against a market-data provider; the agents only see `Bar` objects.
+API also exposes `GET /api/v1/desk/sources`, which reports whether historical data is available.
+
+### Historical replays (Polygon)
+
+Set `POLYGON_API_KEY` on the API (the free plan works), then choose **Polygon historical** under Desk rules → Market data and pick the last session to replay.
+
+- Bars come from Polygon's `/v2/aggs` 5-minute aggregates, split-adjusted, with the key sent as a bearer header.
+- Only NYSE regular hours are replayed (09:30–16:00 ET). Holidays drop out because they have no bars, and the scheduled 1:00 pm early closes (July 3, the day after Thanksgiving, December 24) replay as shorter sessions.
+- One extra trading day before the first session is loaded as indicator warmup and never traded.
+- A 5-minute slot with no trades becomes a flat, zero-volume bar at the last close. Symbols with fewer than half their slots traded on any replayed day are dropped, and the Logger says so.
+- Each symbol's window is cached on disk (`MARKET_DATA_CACHE_DIR`) once fetched, so replays cost no requests. If Polygon's 5-requests-a-minute free limit is hit, symbols already loaded stay cached and the next run picks up the rest.
+- Fills are still simulated at the next bar's open with your slippage and fees, so historical results show how the rules behaved on those days, not what live execution would have returned.
+
+The agents only see `Bar` objects through the `MarketFeed` protocol in `market.py`, so another provider fits behind the same shape.
 
 ## MVP coverage in this scaffold
 
@@ -204,11 +217,11 @@ Plugging in real data later means implementing the `SimulatedMarketFeed.session_
 - SQLAlchemy models aligned to the startup brief schema
 - Pydantic and Zod schemas for report payloads
 - job-based report pipeline, CSV import validation, and Stripe-ready billing scaffolding
-- paper Agent Desk with deterministic synthetic tape, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
+- paper Agent Desk with a synthetic tape or Polygon historical bars, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
 
 ## Next implementation steps
 
 1. Expand billing from stub-safe local mode into live Stripe checkout and webhook deployment config
 2. Add token usage and per-report cost instrumentation around the live LLM path
 3. Extend automated tests into hosted-environment and browser-level workflows
-4. Agent Desk: replay real historical bars through a market-data provider behind the feed interface, then decide whether a broker paper-trading API belongs in scope before anything touches live execution
+4. Agent Desk: decide whether a broker paper-trading API belongs in scope before anything touches live execution

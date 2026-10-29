@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     llm_api_key: str = "replace-me"
     llm_model_name: str = "gpt-4.1-mini"
     llm_request_timeout_seconds: float = 30.0
+    polygon_api_key: str = "replace-me"
+    polygon_base_url: str = "https://api.polygon.io"
+    polygon_request_timeout_seconds: float = 20.0
+    market_data_cache_dir: str = ""
     stripe_secret_key: str = "sk_test_placeholder"
     stripe_webhook_secret: str = "whsec_placeholder"
     stripe_price_id_pro: str = "price_pro_placeholder"
@@ -81,6 +85,16 @@ class Settings(BaseSettings):
     @property
     def is_placeholder_llm_key(self) -> bool:
         return not self.llm_api_key or self.llm_api_key == "replace-me"
+
+    @property
+    def is_polygon_configured(self) -> bool:
+        return bool(self.polygon_api_key) and self.polygon_api_key != "replace-me"
+
+    @property
+    def market_data_cache_path(self) -> Path:
+        if self.market_data_cache_dir:
+            return Path(self.market_data_cache_dir)
+        return API_ROOT / "data" / "market_cache"
 
     @property
     def is_placeholder_auth_secret(self) -> bool:

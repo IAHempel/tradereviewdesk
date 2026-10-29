@@ -5,6 +5,7 @@ import type {
   ChecklistRun,
   ChecklistTemplate,
   DeskConfig,
+  DeskDataSourceInfo,
   DeskRun,
   DeskRunSummary,
   Profile,
@@ -169,6 +170,14 @@ export async function getDeskDefaultsFromBackend(): Promise<DeskConfig | null> {
     return await getBackendJson<DeskConfig>("/api/v1/desk/defaults", { cache: "no-store" });
   } catch {
     return null;
+  }
+}
+
+export async function getDeskSourcesFromBackend(): Promise<DeskDataSourceInfo[]> {
+  try {
+    return await getBackendJson<DeskDataSourceInfo[]>("/api/v1/desk/sources", { cache: "no-store" });
+  } catch {
+    return [];
   }
 }
 

@@ -1,9 +1,11 @@
 import re
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversion"]
+DeskDataSource = Literal["synthetic", "polygon"]
 DeskAgent = Literal["scout", "filter", "analyst", "risk", "executor", "logger"]
 DeskSide = Literal["long", "short"]
 DeskExitReason = Literal["stop", "trail", "target", "bell"]
@@ -14,10 +16,16 @@ DESK_DISCLAIMER = (
     "Paper session on a synthetic market tape. Fills, prices, and P&L are simulated to show how your rules behave. "
     "Nothing here is a trade signal, a forecast, or evidence of real-world profitability."
 )
+HISTORICAL_DESK_DISCLAIMER = (
+    "Paper replay of real historical 5-minute bars. Fills are simulated at bar opens with assumed slippage and fees, "
+    "so real executions would differ. How your rules did on these days is not a forecast or a trade signal."
+)
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,12}$")
 
 
 class DeskConfig(BaseModel):
+    data_source: DeskDataSource = "synthetic"
+    end_date: date | None = None
     symbols: list[str] = Field(default_factory=list, max_length=8)
     starting_balance: float = Field(default=500.0, ge=50, le=1_000_000)
     risk_per_trade_pct: float = Field(default=1.0, gt=0, le=3)
@@ -159,6 +167,13 @@ class DeskKillReason(BaseModel):
     count: int
 
 
+class DeskDataSourceInfo(BaseModel):
+    id: DeskDataSource
+    label: str
+    available: bool
+    detail: str
+
+
 class DeskMonteCarloBand(BaseModel):
     trade_index: int
     p5: float
@@ -204,13 +219,13 @@ class DeskRunSummaryResponse(BaseModel):
     id: str
     created_at: str
     mode: Literal["paper"] = "paper"
-    data_source: Literal["synthetic"] = "synthetic"
+    data_source: DeskDataSource = "synthetic"
     config: DeskConfig
     summary: DeskSummary
 
 
 class DeskRunResponse(DeskRunSummaryResponse):
-    bars_per_session: int
+    session_labels: list[str] = Field(default_factory=list)
     pipeline: DeskPipelineCounts
     setup_edges: list[DeskSetupEdge]
     kill_reasons: list[DeskKillReason]

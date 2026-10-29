@@ -1,8 +1,13 @@
 """Runs a paper desk session: the six agents stepping bar by bar over a synthetic tape."""
 
 import secrets
+from datetime import timedelta
+
+import httpx
 
 from app.schemas.desk import (
+    DESK_DISCLAIMER,
+    HISTORICAL_DESK_DISCLAIMER,
     DeskAgent,
     DeskConfig,
     DeskFrame,
@@ -34,7 +39,9 @@ from app.services.desk.agents import (
     SymbolTape,
     map_journal_tags,
 )
-from app.services.desk.market import BARS_PER_SESSION, Bar, SimulatedMarketFeed, bar_clock
+from app.services.desk.calendar import market_today
+from app.services.desk.historical import load_polygon_feed
+from app.services.desk.market import Bar, MarketFeed, SimulatedMarketFeed, bar_clock
 from app.services.desk.stats import build_summary, run_monte_carlo
 
 FALLBACK_SYMBOLS = ("SPY", "QQQ", "IWM", "AMD", "MSFT", "TSLA")
@@ -43,9 +50,14 @@ MAX_DEFAULT_SYMBOLS = 6
 
 
 def resolve_config(config: DeskConfig, watchlist_symbols: list[str]) -> tuple[DeskConfig, list[str]]:
-    """Fills in symbols and seed. Returns the resolved config plus any symbols added as filler."""
+    """Fills in symbols, seed, and replay date. Returns the resolved config plus any symbols added as filler."""
     updates: dict[str, object] = {}
     added: list[str] = []
+
+    if config.data_source == "synthetic":
+        updates["end_date"] = None
+    elif config.end_date is None:
+        updates["end_date"] = market_today() - timedelta(days=1)
 
     if not config.symbols:
         symbols = [symbol.upper() for symbol in watchlist_symbols][:MAX_DEFAULT_SYMBOLS]
@@ -80,10 +92,10 @@ def journal_counts(trades: list[TradeEntryResponse]) -> dict[DeskSetup, tuple[in
 
 
 class DeskSession:
-    def __init__(self, config: DeskConfig, journal: dict[DeskSetup, tuple[int, int]]) -> None:
+    def __init__(self, config: DeskConfig, journal: dict[DeskSetup, tuple[int, int]], feed: MarketFeed) -> None:
         assert config.seed is not None and config.symbols, "resolve_config must run first"
         self.config = config
-        self.feed = SimulatedMarketFeed(config.symbols, config.seed, config.sessions)
+        self.feed = feed
         self.tapes = {symbol: SymbolTape(symbol) for symbol in config.symbols}
         self.scout = ScoutAgent()
         self.filter = FilterAgent(config)
@@ -105,6 +117,7 @@ class DeskSession:
 
         self.session = 0
         self.step = 0
+        self.session_length = 0
         self.clock = bar_clock(0)
         self.halted = False
         self.cooldown_until = -1
@@ -131,11 +144,17 @@ class DeskSession:
             for bar in self.feed.session_bars(symbol, 0):
                 self.tapes[symbol].append(bar)
 
+        labels = self.feed.session_labels
+        tape = (
+            "a synthetic tape"
+            if self.feed.data_source == "synthetic"
+            else f"Polygon 5-minute bars, {labels[0]} to {labels[-1]}"
+        )
         self.log(
             "logger",
             "session_plan",
-            f"Paper desk armed on {', '.join(self.config.symbols)} with {self.config.risk_per_trade_pct:g}% risk cap, "
-            f"{self.config.kelly_fraction:g} Kelly, max {self.config.max_open_positions} open.",
+            f"Paper desk armed on {', '.join(self.config.symbols)} ({tape}) with {self.config.risk_per_trade_pct:g}% "
+            f"risk cap, {self.config.kelly_fraction:g} Kelly, max {self.config.max_open_positions} open.",
         )
 
         for session in range(1, self.config.sessions + 1):
@@ -149,16 +168,19 @@ class DeskSession:
         self.cooldown_until = -1
         self.loss_streak = 0
         session_bars = {symbol: self.feed.session_bars(symbol, session) for symbol in self.config.symbols}
+        # Sessions vary in length on real data (1:00 pm early closes); every symbol is aligned to the same slots.
+        self.session_length = len(session_bars[self.config.symbols[0]])
+        first_step = len(self.frames)
         day_start_equity = self.config.starting_balance + self.realized
 
-        for index in range(BARS_PER_SESSION):
-            self.step = (session - 1) * BARS_PER_SESSION + index
+        for index in range(self.session_length):
+            self.step = first_step + index
             self.clock = bar_clock(index)
             bars = {symbol: session_bars[symbol][index] for symbol in self.config.symbols}
             marks = {symbol: bar.close for symbol, bar in bars.items()}
 
             self.fill_orders(bars)
-            self.manage_positions(bars, is_last_bar=index == BARS_PER_SESSION - 1)
+            self.manage_positions(bars, is_last_bar=index == self.session_length - 1)
             for symbol, bar in bars.items():
                 self.tapes[symbol].append(bar)
 
@@ -173,7 +195,7 @@ class DeskSession:
                     "No new entries for the rest of the session; open stops stay in place.",
                 )
 
-            scans = self.scan(index, marks) if index < BARS_PER_SESSION - 1 else []
+            scans = self.scan(index, marks) if index < self.session_length - 1 else []
             self.frames.append(self.frame(marks, scans))
 
     def fill_orders(self, bars: dict[str, Bar]) -> None:
@@ -315,6 +337,7 @@ class DeskSession:
 
                 gate = DeskGate(
                     bar_index=index,
+                    session_length=self.session_length,
                     halted=self.halted,
                     cooldown_until=self.cooldown_until,
                     step=self.step,
@@ -461,9 +484,10 @@ class DeskSession:
         return DeskRunResponse(
             id="pending",
             created_at="",
+            data_source=self.feed.data_source,
             config=self.config,
             summary=summary,
-            bars_per_session=BARS_PER_SESSION,
+            session_labels=self.feed.session_labels,
             pipeline=pipeline,
             setup_edges=setup_edges,
             kill_reasons=kill_reasons,
@@ -471,6 +495,7 @@ class DeskSession:
             frames=self.frames,
             events=self.logger.events,
             monte_carlo=run_monte_carlo(self.trade_returns, seed=self.config.seed or 0),
+            disclaimer=DESK_DISCLAIMER if self.feed.data_source == "synthetic" else HISTORICAL_DESK_DISCLAIMER,
         )
 
 
@@ -479,14 +504,27 @@ def run_desk_session(
     *,
     watchlist_symbols: list[str],
     journal_trades: list[TradeEntryResponse],
+    market_client: httpx.Client | None = None,
 ) -> DeskRunResponse:
+    """Runs one paper desk session. Raises MarketDataError when historical bars can't be loaded."""
     resolved, added = resolve_config(config, watchlist_symbols)
+    notes: list[str] = []
+    feed: MarketFeed
+    if resolved.data_source == "polygon":
+        assert resolved.end_date is not None
+        feed, notes = load_polygon_feed(resolved.symbols, resolved.end_date, resolved.sessions, client=market_client)
+        resolved = resolved.model_copy(update={"symbols": feed.symbols})
+    else:
+        feed = SimulatedMarketFeed(resolved.symbols, resolved.seed or 0, resolved.sessions)
+
     journal = journal_counts(journal_trades) if resolved.use_journal_priors else {}
-    session = DeskSession(resolved, journal)
+    session = DeskSession(resolved, journal, feed)
     if added:
         session.log(
             "logger",
             "symbols",
             f"Watchlist had fewer than {MIN_SYMBOLS} symbols, so the tape was topped up with {', '.join(added)}.",
         )
+    for note in notes:
+        session.log("logger", "symbols", note)
     return session.run()

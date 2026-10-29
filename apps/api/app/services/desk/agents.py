@@ -17,7 +17,7 @@ from app.schemas.desk import (
     DeskSetup,
     DeskSide,
 )
-from app.services.desk.market import BARS_PER_SESSION, Bar
+from app.services.desk.market import Bar
 
 LOOKBACK = 20
 FAST_EMA = 9
@@ -238,6 +238,7 @@ class DeskGate:
     """What the Filter needs to know about the desk at the moment a setup arrives."""
 
     bar_index: int
+    session_length: int
     halted: bool
     cooldown_until: int
     step: int
@@ -256,7 +257,7 @@ class FilterAgent:
             return "setup_disabled"
         if gate.bar_index < OPENING_NOISE_BARS:
             return "opening_noise"
-        if gate.bar_index >= BARS_PER_SESSION - CLOSING_BELL_BARS:
+        if gate.bar_index >= gate.session_length - CLOSING_BELL_BARS:
             return "closing_bell"
         if gate.halted:
             return "daily_loss_halt"

@@ -174,8 +174,18 @@ export interface ReportGenerationResult {
 export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
 export type DeskAgent = "scout" | "filter" | "analyst" | "risk" | "executor" | "logger";
 export type DeskSide = "long" | "short";
+export type DeskDataSource = "synthetic" | "polygon";
+
+export interface DeskDataSourceInfo {
+  id: DeskDataSource;
+  label: string;
+  available: boolean;
+  detail: string;
+}
 
 export interface DeskConfig {
+  data_source: DeskDataSource;
+  end_date: string | null;
   symbols: string[];
   starting_balance: number;
   risk_per_trade_pct: number;
@@ -343,13 +353,13 @@ export interface DeskRunSummary {
   id: string;
   created_at: string;
   mode: "paper";
-  data_source: "synthetic";
+  data_source: DeskDataSource;
   config: DeskConfig;
   summary: DeskSummary;
 }
 
 export interface DeskRun extends DeskRunSummary {
-  bars_per_session: number;
+  session_labels: string[];
   pipeline: DeskPipelineCounts;
   setup_edges: DeskSetupEdge[];
   kill_reasons: DeskKillReason[];

@@ -6,6 +6,7 @@ import clsx from "clsx";
 import type {
   DeskAgent,
   DeskConfig,
+  DeskDataSourceInfo,
   DeskEvent,
   DeskFrame,
   DeskRun,
@@ -24,6 +25,7 @@ import {
   formatRunLabel,
   formatSigned,
   formatSignedMoney,
+  latestReplayableDay,
 } from "@/lib/desk";
 
 const iconPaths: Record<DeskAgent, ReactNode> = {
@@ -487,7 +489,7 @@ export function RunHistory({
             <span className="text-slate-400">
               {loadingId === run.id
                 ? "Loading…"
-                : `${run.config.sessions} session${run.config.sessions === 1 ? "" : "s"} · ${run.summary.trades} trades · seed ${run.config.seed}`}
+                : `${runTapeSummary(run)} · ${run.summary.trades} trades`}
             </span>
             <span className="text-right tabular-nums text-slate-400">{run.summary.multiple.toFixed(3)}×</span>
           </button>
@@ -495,6 +497,14 @@ export function RunHistory({
       ))}
     </ul>
   );
+}
+
+function runTapeSummary(run: DeskRunSummary): string {
+  const sessions = `${run.config.sessions} session${run.config.sessions === 1 ? "" : "s"}`;
+  if (run.data_source === "polygon") {
+    return `Polygon · ${sessions} to ${run.config.end_date ?? "?"}`;
+  }
+  return `Synthetic · ${sessions} · seed ${run.config.seed}`;
 }
 
 function NumberField({
@@ -530,18 +540,75 @@ function NumberField({
   );
 }
 
+const POLYGON_FREE_REQUESTS_PER_MINUTE = 5;
+
 export function DeskRulesForm({
   config,
+  sources,
   onChange,
 }: {
   config: DeskConfig;
+  sources: DeskDataSourceInfo[];
   onChange: (config: DeskConfig) => void;
 }) {
   const [symbolsText, setSymbolsText] = useState(config.symbols.join(", "));
   const set = <K extends keyof DeskConfig>(key: K, value: DeskConfig[K]) => onChange({ ...config, [key]: value });
+  const latestDay = latestReplayableDay();
 
   return (
     <div className="grid gap-5">
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Market data</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          {sources.map((source) => {
+            const selected = config.data_source === source.id;
+            return (
+              <button
+                key={source.id}
+                type="button"
+                disabled={!source.available}
+                aria-pressed={selected}
+                onClick={() =>
+                  onChange({
+                    ...config,
+                    data_source: source.id,
+                    end_date: source.id === "polygon" ? (config.end_date ?? latestDay) : null,
+                  })
+                }
+                className={clsx(
+                  "rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50",
+                  selected ? "border-cyan-300/60 bg-cyan-300/10" : "border-white/10 hover:border-white/25",
+                )}
+              >
+                <span className="block text-sm font-semibold text-white">{source.label}</span>
+                <span className="mt-1 block text-xs text-slate-400">{source.detail}</span>
+              </button>
+            );
+          })}
+        </div>
+        {config.data_source === "polygon" ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_2fr] sm:items-end">
+            <label className="grid gap-1 text-xs text-slate-400">
+              Replay through (last session)
+              <input
+                type="date"
+                value={config.end_date ?? latestDay}
+                max={latestDay}
+                onChange={(event) => set("end_date", event.target.value || null)}
+                className={fieldClass}
+              />
+            </label>
+            <p className="text-xs text-slate-400">
+              Replays the {config.sessions} trading day{config.sessions === 1 ? "" : "s"} up to this date, plus the day before
+              as indicator warmup. Weekends and holidays are skipped.
+              {config.symbols.length > POLYGON_FREE_REQUESTS_PER_MINUTE
+                ? ` Polygon's free plan loads ${POLYGON_FREE_REQUESTS_PER_MINUTE} symbols a minute; extra symbols may need a second run a minute later.`
+                : ""}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr]">
         <label className="grid gap-1 text-xs text-slate-400">
           Symbols (up to 8; blank uses your watchlist)
@@ -562,7 +629,7 @@ export function DeskRulesForm({
           />
         </label>
         <NumberField label="Starting balance ($)" value={config.starting_balance} onChange={(v) => set("starting_balance", v)} step={50} min={50} max={1000000} />
-        <NumberField label="Sessions" value={config.sessions} onChange={(v) => set("sessions", v)} step={1} min={1} max={5} hint="Each session is one synthetic 09:30–16:00 day." />
+        <NumberField label="Sessions" value={config.sessions} onChange={(v) => set("sessions", v)} step={1} min={1} max={5} hint="Each session is one 09:30–16:00 trading day." />
       </div>
 
       <div>

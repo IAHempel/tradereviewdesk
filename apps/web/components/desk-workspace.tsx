@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
-import type { DeskConfig, DeskRun, DeskRunSummary } from "@tradenoc/types";
+import type { DeskConfig, DeskDataSourceInfo, DeskRun, DeskRunSummary } from "@tradenoc/types";
 import { Card } from "@tradenoc/ui";
 import { EquityChart, KillReasonBars, MonteCarloFan, ScoutRadar } from "@/components/desk-charts";
 import {
@@ -21,12 +21,16 @@ import { StatePanel } from "@/components/state-panels";
 import {
   DESK_AGENTS,
   FALLBACK_DESK_CONFIG,
+  TAPE_LABELS,
   deriveView,
   formatMoney,
   formatPercent,
   formatR,
   formatSigned,
   formatSignedMoney,
+  replayRangeLabel,
+  sessionLabel,
+  shortSessionLabel,
   splitMoney,
   toneFor,
 } from "@/lib/desk";
@@ -38,6 +42,9 @@ const SPEEDS = [
   { label: "12×", bars: 12 },
 ];
 const KELLY_LABELS: Record<number, string> = { 0.1: "1/10", 0.25: "1/4", 0.5: "1/2", 1: "full" };
+const FALLBACK_SOURCES: DeskDataSourceInfo[] = [
+  { id: "synthetic", label: "Synthetic tape", available: true, detail: "Seeded random market with no edge built in." },
+];
 
 function summarySkeleton(run: DeskRun): DeskRunSummary {
   return {
@@ -63,10 +70,12 @@ function Panel({ title, subtitle, children, className }: { title: string; subtit
 export function DeskWorkspace({
   defaults,
   runs: initialRuns,
+  sources,
   initialRun,
 }: {
   defaults: DeskConfig | null;
   runs: DeskRunSummary[];
+  sources: DeskDataSourceInfo[];
   initialRun: DeskRun | null;
 }) {
   const [config, setConfig] = useState<DeskConfig>(() => ({ ...(initialRun?.config ?? defaults ?? FALLBACK_DESK_CONFIG), seed: null }));
@@ -178,6 +187,8 @@ export function DeskWorkspace({
   const pnlTone = view ? toneFor(view.pnl) : "flat";
   const sessionCount = run?.config.sessions ?? config.sessions;
   const statusLabel = !run ? "Idle" : playing ? "Live replay" : view?.isComplete ? "Session closed" : "Paused";
+  const replayRange = run ? replayRangeLabel(run) : null;
+  const tapeLabel = run ? (replayRange ? `${TAPE_LABELS.polygon} · ${replayRange}` : TAPE_LABELS[run.data_source]) : TAPE_LABELS[config.data_source];
 
   return (
     <div className="grid gap-4">
@@ -196,6 +207,7 @@ export function DeskWorkspace({
           <div>
             <h2 className="text-base font-semibold text-white">Desk rules</h2>
             <p className="mt-1 text-xs text-slate-400">
+              {config.data_source === "polygon" ? `Polygon bars through ${config.end_date ?? "yesterday"}` : "Synthetic tape"} ·{" "}
               {config.symbols.length ? config.symbols.join(" · ") : "Watchlist symbols"} · {config.risk_per_trade_pct}% risk ·{" "}
               {KELLY_LABELS[config.kelly_fraction] ?? config.kelly_fraction} Kelly · max {config.max_open_positions} open ·{" "}
               {config.max_daily_loss_pct}% daily stop · {config.sessions} session{config.sessions === 1 ? "" : "s"}
@@ -222,7 +234,7 @@ export function DeskWorkspace({
         </div>
         {rulesOpen ? (
           <div className="mt-5 border-t border-white/10 pt-5">
-            <DeskRulesForm config={config} onChange={setConfig} />
+            <DeskRulesForm config={config} sources={sources.length ? sources : FALLBACK_SOURCES} onChange={setConfig} />
           </div>
         ) : null}
         {error ? (
@@ -240,7 +252,7 @@ export function DeskWorkspace({
           <p className="font-mono text-2xl font-semibold tabular-nums text-white">{frame?.clock ?? "09:30"}</p>
           <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs text-slate-300">
             <span className={clsx("h-1.5 w-1.5 rounded-full", playing ? "bg-cyan-300 motion-safe:animate-pulse" : "bg-slate-500")} />
-            {frame ? `session ${frame.session} of ${sessionCount}` : "paper session"}
+            {frame && run ? `${sessionLabel(run, frame.session)} · ${frame.session} of ${sessionCount}` : "paper session"}
           </span>
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-white">{DESK_AGENTS.length}</span> agents
@@ -259,7 +271,7 @@ export function DeskWorkspace({
               <div>
                 <p className="text-2xl font-semibold text-white">Agent Desk</p>
                 <p className="text-xs text-slate-400">
-                  Paper · synthetic tape · {(run?.config ?? config).risk_per_trade_pct}% risk · max{" "}
+                  Paper · {tapeLabel} · {(run?.config ?? config).risk_per_trade_pct}% risk · max{" "}
                   {(run?.config ?? config).max_open_positions} open
                 </p>
               </div>
@@ -329,7 +341,7 @@ export function DeskWorkspace({
               currentIndex={step}
               startingBalance={run.summary.starting_balance}
               trades={view.closedTrades}
-              barsPerSession={run.bars_per_session}
+              sessionMarker={(session) => shortSessionLabel(run, session)}
             />
           </div>
         ) : (
@@ -421,10 +433,10 @@ export function DeskWorkspace({
         ) : null}
 
         <div className="mt-4 flex flex-wrap justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-slate-500">
-          <span>Paper session · synthetic tape · not financial advice</span>
+          <span>Paper session · {tapeLabel} · not financial advice</span>
           <span>
             TradeReviewDesk · {(run?.config ?? config).risk_per_trade_pct}% rule
-            {run ? ` · seed ${run.config.seed}` : ""}
+            {run?.data_source === "synthetic" ? ` · seed ${run.config.seed}` : ""}
           </span>
         </div>
       </section>
@@ -488,7 +500,7 @@ export function DeskWorkspace({
         <Panel title="Screenshot reality check" subtitle="Viral bot posts rarely show the math. This does.">
           <ClaimCheckCard run={run} />
         </Panel>
-        <Panel title="Saved sessions" subtitle="Same seed and rules replay exactly.">
+        <Panel title="Saved sessions" subtitle="The same rules on the same seed or dates replay exactly.">
           <RunHistory runs={runs} activeId={run?.id ?? null} onSelect={openRun} loadingId={loadingId} />
         </Panel>
       </div>
@@ -497,7 +509,7 @@ export function DeskWorkspace({
         title="Paper only, on purpose"
         message={
           run?.disclaimer ??
-          "The desk runs your rules against a synthetic market tape with paper fills. It never places real orders and its results are not evidence of real-world profitability."
+          "The desk runs your rules with paper fills on a synthetic tape or real historical bars. It never places real orders, and its results are not evidence of future profitability."
         }
         tone="warning"
       />

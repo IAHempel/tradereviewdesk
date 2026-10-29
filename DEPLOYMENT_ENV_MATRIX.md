@@ -59,6 +59,9 @@ Set these environment variables in Railway:
 | `LLM_API_KEY` | `sk-proj-...` | Yes | OpenAI API key for live report generation. |
 | `LLM_MODEL_NAME` | `gpt-4.1-mini` | Yes | Recommended starting model. |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `30` | Recommended | Can remain `30` to start. |
+| `POLYGON_API_KEY` | `your-polygon-key` | Optional | Enables Agent Desk replays of real historical 5-minute bars. Without it the desk offers only the synthetic tape. |
+| `POLYGON_BASE_URL` | `https://api.polygon.io` | Optional | Override only if Polygon changes its API host. |
+| `MARKET_DATA_CACHE_DIR` | `/data/market_cache` | Optional | Where fetched bars are cached. Defaults to `apps/api/data/market_cache`; point it at a persistent volume to keep the cache across deploys. |
 | `STRIPE_SECRET_KEY` | `sk_live_...` | Yes for live billing | Required for checkout, portal, and webhooks. |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | Yes for live billing | Must match the live Stripe webhook endpoint. |
 | `STRIPE_PRICE_ID_PRO` | `price_...` | Yes for live billing | Live Stripe price ID for Pro. |
@@ -124,6 +127,16 @@ Copy into Railway:
 | `LLM_API_KEY` | your live OpenAI API key |
 | `LLM_MODEL_NAME` | `gpt-4.1-mini` |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `30` |
+
+## Polygon (optional)
+
+Copy into Railway to let the Agent Desk replay real historical bars:
+
+| Variable | Recommended value |
+| --- | --- |
+| `POLYGON_API_KEY` | your Polygon API key (the free plan works) |
+
+The free plan allows 5 requests a minute and the desk makes one request per uncached symbol, so the first replay of more than five symbols may need a second run a minute later. Repeat replays of the same dates are served from the cache.
 
 ## DNS
 
