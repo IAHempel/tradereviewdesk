@@ -91,6 +91,19 @@ class DeskEngineTests(unittest.TestCase):
         result = run(sessions=5, allowed_setups=["breakout"])
         self.assertTrue(all(trade.setup == "breakout" for trade in result.trades))
 
+    def test_tape_lines_up_with_frames(self) -> None:
+        result = run()
+        feed = SimulatedMarketFeed(SYMBOLS, 11, 3)
+        for symbol in SYMBOLS:
+            self.assertEqual(len(result.tape[symbol]), len(result.frames))
+            bar = feed.session_bars(symbol, 2)[5]
+            self.assertEqual(result.tape[symbol][BARS_PER_SESSION + 5], [bar.open, bar.high, bar.low, bar.close, bar.volume])
+
+    def test_milestones_are_validated(self) -> None:
+        self.assertEqual(DeskConfig(milestones=[1.05, 1.01, 1.05]).milestones, [1.01, 1.05])
+        with self.assertRaises(ValueError):
+            DeskConfig(milestones=[0.9])
+
     def test_equity_accounting_balances(self) -> None:
         result = run(sessions=4)
         summary = result.summary
@@ -197,7 +210,8 @@ class DeskApiTests(unittest.TestCase):
         self.assertEqual(run["mode"], "paper")
         self.assertEqual(run["data_source"], "synthetic")
         self.assertEqual(run["config"]["seed"], 5)
-        self.assertEqual(len(run["frames"]), 2 * run["bars_per_session"])
+        self.assertEqual(run["session_labels"], ["Session 1", "Session 2"])
+        self.assertEqual(len(run["frames"]), 2 * BARS_PER_SESSION)
 
         listed = self.client.get("/api/v1/desk/runs", headers=headers).json()
         self.assertEqual([item["id"] for item in listed], [run["id"]])

@@ -1,6 +1,7 @@
 import type {
   DeskAgent,
   DeskConfig,
+  DeskDataSource,
   DeskFrame,
   DeskPipelineCounts,
   DeskRun,
@@ -19,6 +20,8 @@ export const SETUP_LABELS: Record<DeskSetup, string> = {
 };
 
 export const FALLBACK_DESK_CONFIG: DeskConfig = {
+  data_source: "synthetic",
+  end_date: null,
   symbols: ["SPY", "QQQ", "IWM", "AMD"],
   starting_balance: 500,
   risk_per_trade_pct: 1,
@@ -35,6 +38,13 @@ export const FALLBACK_DESK_CONFIG: DeskConfig = {
   sessions: 1,
   allowed_setups: DESK_SETUPS,
   use_journal_priors: true,
+  use_trade_flow: true,
+  flow_veto: 0.35,
+  use_ai_seat: true,
+  ai_seat_budget: 8,
+  seat_veto: 0.7,
+  milestones: [1.01, 1.02, 1.05, 1.1],
+  checkpoint_drawdown_pct: 1.5,
   seed: null,
 };
 
@@ -53,6 +63,12 @@ export const DESK_AGENTS: AgentMeta[] = [
     count: (p) => `${p.scout_flagged.toLocaleString()} setups`,
   },
   {
+    id: "flow",
+    label: "Flow",
+    role: "Keeps a 24-bar decaying memory of buy vs sell volume and vetoes continuation setups that fight it.",
+    count: (p) => `${p.flow_vetoes.toLocaleString()} vetoes`,
+  },
+  {
     id: "filter",
     label: "Filter",
     role: "Applies your hard rules: time windows, limits, stop distance, reward:risk.",
@@ -69,6 +85,12 @@ export const DESK_AGENTS: AgentMeta[] = [
     label: "Risk",
     role: "Sizes by the smaller of your risk cap and fractional Kelly; halts on limits.",
     count: (p) => `${p.risk_sized.toLocaleString()} sized`,
+  },
+  {
+    id: "seat",
+    label: "Skeptic",
+    role: "Answers four yes/no risk questions with probabilities on every sized order and vetoes any that look too risky.",
+    count: (p) => `${p.seat_vetoes.toLocaleString()} vetoes`,
   },
   {
     id: "executor",
@@ -90,14 +112,22 @@ export function formatMoney(value: number): string {
   return currency.format(value);
 }
 
+function signFor(rounded: string, value: number): string {
+  // Decide the sign from the rounded text so a value that displays as zero never reads "−0.00".
+  if (Number(rounded.replace(/[^0-9.]/g, "")) === 0) {
+    return "";
+  }
+  return value > 0 ? "+" : "−";
+}
+
 export function formatSignedMoney(value: number): string {
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${currency.format(Math.abs(value))}`;
+  const text = currency.format(Math.abs(value));
+  return `${signFor(text, value)}${text}`;
 }
 
 export function formatSigned(value: number, digits = 2, suffix = ""): string {
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${Math.abs(value).toFixed(digits)}${suffix}`;
+  const text = Math.abs(value).toFixed(digits);
+  return `${signFor(text, value)}${text}${suffix}`;
 }
 
 export function formatR(value: number): string {
@@ -235,10 +265,82 @@ export function checkClaim(start: number, end: number, days: number, run: DeskRu
   };
 }
 
+const MARKET_TIME_ZONE = "America/New_York";
+// Fixed time zones keep server and browser rendering identical, so hydration never disagrees.
+const runTimeFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: MARKET_TIME_ZONE,
+});
+const sessionDayFormat = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const shortDayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const isoDayFormat = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  timeZone: MARKET_TIME_ZONE,
+});
+
 export function formatRunLabel(createdAt: string): string {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) {
     return createdAt;
   }
-  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `${runTimeFormat.format(date)} ET`;
+}
+
+export const PROVIDER_NAMES: Record<DeskDataSource, string> = {
+  synthetic: "Synthetic",
+  polygon: "Polygon",
+  alpaca: "Alpaca",
+};
+
+export const TAPE_LABELS: Record<DeskDataSource, string> = {
+  synthetic: "synthetic tape",
+  polygon: "Polygon 5-min bars",
+  alpaca: "Alpaca 5-min bars",
+};
+
+function parseDay(isoDay: string): Date | null {
+  const date = new Date(`${isoDay}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** "Tue, Nov 25" for a replayed trading day; "Session 2" on the synthetic tape. */
+export function sessionLabel(run: Pick<DeskRun, "data_source" | "session_labels">, session: number): string {
+  const label = run.session_labels?.[session - 1];
+  const day = run.data_source !== "synthetic" && label ? parseDay(label) : null;
+  return day ? sessionDayFormat.format(day) : `Session ${session}`;
+}
+
+/** Compact marker for chart session dividers: "Nov 25" or "S2". */
+export function shortSessionLabel(run: Pick<DeskRun, "data_source" | "session_labels">, session: number): string {
+  const label = run.session_labels?.[session - 1];
+  const day = run.data_source !== "synthetic" && label ? parseDay(label) : null;
+  return day ? shortDayFormat.format(day) : `S${session}`;
+}
+
+export function replayRangeLabel(run: Pick<DeskRun, "data_source" | "session_labels">): string | null {
+  if (run.data_source === "synthetic" || !run.session_labels?.length) {
+    return null;
+  }
+  const first = parseDay(run.session_labels[0]);
+  const last = parseDay(run.session_labels[run.session_labels.length - 1]);
+  if (!first || !last) {
+    return null;
+  }
+  return first.getTime() === last.getTime()
+    ? shortDayFormat.format(first)
+    : `${shortDayFormat.format(first)} – ${shortDayFormat.format(last)}`;
+}
+
+/** The last calendar day before today in New York, as YYYY-MM-DD: the newest day that can be replayed. */
+export function latestReplayableDay(): string {
+  const today = parseDay(isoDayFormat.format(new Date()));
+  if (!today) {
+    return "";
+  }
+  return new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10);
 }

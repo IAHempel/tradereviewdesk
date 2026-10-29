@@ -1,12 +1,14 @@
 import re
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversion"]
-DeskAgent = Literal["scout", "filter", "analyst", "risk", "executor", "logger"]
+DeskDataSource = Literal["synthetic", "polygon", "alpaca"]
+DeskAgent = Literal["scout", "flow", "filter", "analyst", "risk", "seat", "executor", "logger"]
 DeskSide = Literal["long", "short"]
-DeskExitReason = Literal["stop", "trail", "target", "bell"]
+DeskExitReason = Literal["stop", "trail", "target", "bell", "stopped"]
 DeskScanStatus = Literal["killed", "ordered"]
 
 DESK_SETUPS: tuple[DeskSetup, ...] = ("breakout", "sweep_reclaim", "trend_pullback", "mean_reversion")
@@ -14,10 +16,16 @@ DESK_DISCLAIMER = (
     "Paper session on a synthetic market tape. Fills, prices, and P&L are simulated to show how your rules behave. "
     "Nothing here is a trade signal, a forecast, or evidence of real-world profitability."
 )
+HISTORICAL_DESK_DISCLAIMER = (
+    "Paper replay of real historical 5-minute bars. Fills are simulated at bar opens with assumed slippage and fees, "
+    "so real executions would differ. How your rules did on these days is not a forecast or a trade signal."
+)
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,12}$")
 
 
 class DeskConfig(BaseModel):
+    data_source: DeskDataSource = "synthetic"
+    end_date: date | None = None
     symbols: list[str] = Field(default_factory=list, max_length=8)
     starting_balance: float = Field(default=500.0, ge=50, le=1_000_000)
     risk_per_trade_pct: float = Field(default=1.0, gt=0, le=3)
@@ -34,6 +42,13 @@ class DeskConfig(BaseModel):
     sessions: int = Field(default=1, ge=1, le=5)
     allowed_setups: list[DeskSetup] = Field(default_factory=lambda: list(DESK_SETUPS), min_length=1)
     use_journal_priors: bool = True
+    use_trade_flow: bool = True
+    flow_veto: float = Field(default=0.35, ge=0.05, le=1.0)
+    use_ai_seat: bool = True
+    ai_seat_budget: int = Field(default=8, ge=0, le=30)
+    seat_veto: float = Field(default=0.7, ge=0.3, le=1.0)
+    milestones: list[float] = Field(default_factory=lambda: [1.01, 1.02, 1.05, 1.1], max_length=6)
+    checkpoint_drawdown_pct: float = Field(default=1.5, ge=0.25, le=10)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
     @field_validator("symbols")
@@ -49,6 +64,14 @@ class DeskConfig(BaseModel):
             if symbol not in normalized:
                 normalized.append(symbol)
         return normalized
+
+    @field_validator("milestones")
+    @classmethod
+    def ascending_milestones(cls, value: list[float]) -> list[float]:
+        cleaned = sorted({round(item, 4) for item in value})
+        if any(item <= 1 or item > 100 for item in cleaned):
+            raise ValueError("Milestones are equity multiples above 1 (for example 1.02 for +2%).")
+        return cleaned
 
     @field_validator("allowed_setups")
     @classmethod
@@ -69,6 +92,10 @@ class DeskPipelineCounts(BaseModel):
     stops_trailed: int = 0
     stops_widened: int = 0
     logger_reasons: int = 0
+    flow_vetoes: int = 0
+    seat_reviews: int = 0
+    seat_vetoes: int = 0
+    seat_ai_calls: int = 0
 
 
 class DeskPosition(BaseModel):
@@ -100,6 +127,7 @@ class DeskFrame(BaseModel):
     scans: list[DeskScanMark] = Field(default_factory=list)
     pipeline: DeskPipelineCounts
     halted: bool = False
+    flow: dict[str, float] = Field(default_factory=dict)
 
 
 class DeskEvent(BaseModel):
@@ -138,6 +166,41 @@ class DeskTrade(BaseModel):
     thesis: str
 
 
+class DeskSeatAnswer(BaseModel):
+    id: str
+    question: str
+    probability: float
+    reason: str
+
+
+class DeskSeatVerdict(BaseModel):
+    step: int
+    session: int
+    clock: str
+    symbol: str
+    setup: DeskSetup
+    side: DeskSide
+    trade_id: str | None = None
+    source: Literal["llm", "heuristic"]
+    model: str | None = None
+    answers: list[DeskSeatAnswer]
+    thesis: str
+    vetoed: bool
+
+
+class DeskCheckpoint(BaseModel):
+    index: int
+    kind: Literal["milestone", "drawdown"]
+    step: int
+    session: int
+    clock: str
+    equity: float
+    multiple: float
+    message: str
+    decision: Literal["continue", "stop"] | None = None
+    decided_step: int | None = None
+
+
 class DeskSetupEdge(BaseModel):
     setup: DeskSetup
     enabled: bool
@@ -157,6 +220,13 @@ class DeskKillReason(BaseModel):
     code: str
     label: str
     count: int
+
+
+class DeskDataSourceInfo(BaseModel):
+    id: DeskDataSource
+    label: str
+    available: bool
+    detail: str
 
 
 class DeskMonteCarloBand(BaseModel):
@@ -204,13 +274,16 @@ class DeskRunSummaryResponse(BaseModel):
     id: str
     created_at: str
     mode: Literal["paper"] = "paper"
-    data_source: Literal["synthetic"] = "synthetic"
+    data_source: DeskDataSource = "synthetic"
     config: DeskConfig
     summary: DeskSummary
 
 
 class DeskRunResponse(DeskRunSummaryResponse):
-    bars_per_session: int
+    session_labels: list[str] = Field(default_factory=list)
+    # Scheduled bars per session; a live session has fewer frames than this until the close.
+    session_lengths: list[int] = Field(default_factory=list)
+    checkpoints: list[DeskCheckpoint] = Field(default_factory=list)
     pipeline: DeskPipelineCounts
     setup_edges: list[DeskSetupEdge]
     kill_reasons: list[DeskKillReason]
@@ -218,4 +291,57 @@ class DeskRunResponse(DeskRunSummaryResponse):
     frames: list[DeskFrame]
     events: list[DeskEvent]
     monte_carlo: DeskMonteCarlo | None = None
+    flow_source: str = "bar proxy"
+    seat_verdicts: list[DeskSeatVerdict] = Field(default_factory=list)
+    # Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`.
+    tape: dict[str, list[list[float]]] = Field(default_factory=dict)
     disclaimer: str = DESK_DISCLAIMER
+
+
+DeskLiveStatus = Literal["scheduled", "running", "awaiting_decision", "stopping", "stopped", "closed", "error"]
+DESK_LIVE_ACTIVE_STATUSES: tuple[DeskLiveStatus, ...] = ("scheduled", "running", "awaiting_decision", "stopping")
+
+
+class DeskLiveStartRequest(DeskConfig):
+    notify_url: str | None = Field(default=None, max_length=500)
+
+
+class DeskLiveDecisionRequest(BaseModel):
+    checkpoint: int = Field(ge=0)
+    decision: Literal["continue", "stop"]
+
+
+class DeskLiveSessionRecord(BaseModel):
+    """Everything a live session needs to be recomputed from scratch on any tick."""
+
+    id: str
+    created_at: str
+    status: DeskLiveStatus
+    session_date: date
+    config: DeskConfig
+    market_state: dict = Field(default_factory=dict)
+    decisions: dict[str, dict] = Field(default_factory=dict)
+    manual_stop_step: int | None = None
+    result: DeskRunResponse | None = None
+    notify_url: str | None = None
+    notified: list[str] = Field(default_factory=list)
+    notify_error: str | None = None
+    message: str | None = None
+    last_tick_at: str | None = None
+    run_id: str | None = None
+
+
+class DeskLiveSessionResponse(BaseModel):
+    id: str
+    created_at: str
+    status: DeskLiveStatus
+    session_date: date
+    config: DeskConfig
+    last_tick_at: str | None = None
+    next_bar_at: str | None = None
+    message: str | None = None
+    notify_channel: str | None = None
+    notify_error: str | None = None
+    open_checkpoint: DeskCheckpoint | None = None
+    run_id: str | None = None
+    result: DeskRunResponse | None = None

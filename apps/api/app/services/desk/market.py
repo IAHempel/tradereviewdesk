@@ -11,6 +11,7 @@ import hashlib
 import math
 import random
 from dataclasses import dataclass
+from typing import Protocol
 
 BARS_PER_SESSION = 78
 BAR_MINUTES = 5
@@ -31,6 +32,36 @@ class Bar:
     low: float
     close: float
     volume: float
+
+
+class MarketDataError(Exception):
+    """A market-data problem worth showing to the user, with the HTTP status the API should return."""
+
+    def __init__(self, message: str, *, status_code: int = 502) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+class MarketFeed(Protocol):
+    """What the desk needs from a tape: aligned bars per symbol per session; session 0 is warmup.
+
+    `session_flow` returns trade-print buy/sell volume per slot when the feed has prints,
+    else None (the Flow agent then falls back to its bar proxy).
+    """
+
+    data_source: str
+    flow_source: str
+    symbols: list[str]
+    session_labels: list[str]
+
+    def session_bars(self, symbol: str, session: int) -> list[Bar]: ...
+
+    def session_length(self, session: int) -> int:
+        """Scheduled bars in the session; more than `session_bars` returns while a live session is in progress."""
+        ...
+
+    def session_flow(self, symbol: str, session: int) -> list | None: ...
 
 
 def bar_clock(index: int) -> str:
@@ -57,10 +88,18 @@ class SimulatedMarketFeed:
         self.symbols = list(symbols)
         self.seed = seed
         self.sessions = sessions
+        self.session_labels = [f"Session {session}" for session in range(1, sessions + 1)]
+        self.flow_source = "bar proxy"
         self._tape = {symbol: self._generate(symbol) for symbol in self.symbols}
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]:
         return self._tape[symbol][session]
+
+    def session_length(self, session: int) -> int:
+        return BARS_PER_SESSION
+
+    def session_flow(self, symbol: str, session: int) -> None:
+        return None
 
     def _generate(self, symbol: str) -> list[list[Bar]]:
         profile = _stable_int("profile", symbol)

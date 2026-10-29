@@ -12,6 +12,7 @@ __pycache__
 .ruff_cache
 *.pyc
 apps/api/data/store_state.json
+apps/api/data/market_cache/
 .env
 .env.local
 .DS_Store

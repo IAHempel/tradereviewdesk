@@ -8,6 +8,7 @@ export const marketingNav = [
 export const appNav = [
   { href: "/app/dashboard", label: "Dashboard" },
   { href: "/app/desk", label: "Agent desk" },
+  { href: "/app/binary", label: "Binary desk" },
   { href: "/app/premarket", label: "Premarket" },
   { href: "/app/checklists", label: "Checklists" },
   { href: "/app/debrief", label: "Debrief" },

@@ -2,9 +2,14 @@ import "server-only";
 
 import type {
   BillingSessionResult,
+  BinaryConfig,
+  BinaryRun,
+  BinaryRunSummary,
   ChecklistRun,
   ChecklistTemplate,
   DeskConfig,
+  DeskDataSourceInfo,
+  DeskLiveSession,
   DeskRun,
   DeskRunSummary,
   Profile,
@@ -172,6 +177,14 @@ export async function getDeskDefaultsFromBackend(): Promise<DeskConfig | null> {
   }
 }
 
+export async function getDeskSourcesFromBackend(): Promise<DeskDataSourceInfo[]> {
+  try {
+    return await getBackendJson<DeskDataSourceInfo[]>("/api/v1/desk/sources", { cache: "no-store" });
+  } catch {
+    return [];
+  }
+}
+
 export async function getDeskRunsFromBackend(): Promise<DeskRunSummary[]> {
   try {
     return await getBackendJson<DeskRunSummary[]>("/api/v1/desk/runs", { cache: "no-store" });
@@ -183,6 +196,38 @@ export async function getDeskRunsFromBackend(): Promise<DeskRunSummary[]> {
 export async function getDeskRunFromBackend(runId: string): Promise<DeskRun | null> {
   try {
     return await getBackendJson<DeskRun>(`/api/v1/desk/runs/${encodeURIComponent(runId)}`, { cache: "no-store" });
+  } catch {
+    return null;
+  }
+}
+
+export async function getDeskLiveFromBackend(): Promise<DeskLiveSession | null> {
+  try {
+    return await getBackendJson<DeskLiveSession | null>("/api/v1/desk/live", { cache: "no-store" });
+  } catch {
+    return null;
+  }
+}
+
+export async function getBinaryDefaultsFromBackend(): Promise<BinaryConfig | null> {
+  try {
+    return await getBackendJson<BinaryConfig>("/api/v1/binary/defaults", { cache: "no-store" });
+  } catch {
+    return null;
+  }
+}
+
+export async function getBinaryRunsFromBackend(): Promise<BinaryRunSummary[]> {
+  try {
+    return await getBackendJson<BinaryRunSummary[]>("/api/v1/binary/runs", { cache: "no-store" });
+  } catch {
+    return [];
+  }
+}
+
+export async function getBinaryRunFromBackend(runId: string): Promise<BinaryRun | null> {
+  try {
+    return await getBackendJson<BinaryRun>(`/api/v1/binary/runs/${encodeURIComponent(runId)}`, { cache: "no-store" });
   } catch {
     return null;
   }

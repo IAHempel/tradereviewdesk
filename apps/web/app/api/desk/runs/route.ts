@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { getRouteAuthFailureResponse } from "@/lib/auth";
 import { backendFetch } from "@/lib/backend";
 
+// A first historical replay fetches one Polygon window per symbol before the run starts.
+export const maxDuration = 60;
+
 export async function GET() {
   try {
     const authFailure = await getRouteAuthFailureResponse();

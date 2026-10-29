@@ -24,13 +24,16 @@ export function EquityChart({
   currentIndex,
   startingBalance,
   trades,
-  barsPerSession,
+  sessionMarker,
+  totalSteps,
 }: {
   frames: DeskFrame[];
   currentIndex: number;
   startingBalance: number;
   trades: DeskTrade[];
-  barsPerSession: number;
+  sessionMarker: (session: number) => string;
+  /** Scheduled bars in the whole run; a live session leaves room for the bars still to come. */
+  totalSteps?: number;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const visible = frames.slice(0, currentIndex + 1);
@@ -40,7 +43,7 @@ export function EquityChart({
   const padding = Math.max((rawMax - rawMin) * 0.15, startingBalance * 0.002);
   const yMin = rawMin - padding;
   const yMax = rawMax + padding;
-  const lastIndex = Math.max(frames.length - 1, 1);
+  const lastIndex = Math.max((totalSteps ?? frames.length) - 1, frames.length - 1, 1);
 
   const x = (index: number) => (index / lastIndex) * VIEW_WIDTH;
   const y = (value: number) => VIEW_HEIGHT - ((value - yMin) / (yMax - yMin)) * VIEW_HEIGHT;
@@ -49,7 +52,7 @@ export function EquityChart({
   const area = points.length ? `${line} L${points[points.length - 1][0]},${VIEW_HEIGHT} L0,${VIEW_HEIGHT} Z` : "";
   const sessionStarts = frames
     .map((frame, index) => ({ frame, index }))
-    .filter(({ index }) => index > 0 && index % barsPerSession === 0);
+    .filter(({ frame, index }) => index > 0 && frame.session !== frames[index - 1].session);
   const worstTrade = trades.length ? trades.reduce((worst, trade) => (trade.pnl < worst.pnl ? trade : worst)) : null;
   const hovered = hoverIndex !== null ? visible[hoverIndex] : null;
 
@@ -132,7 +135,7 @@ export function EquityChart({
             className="pointer-events-none absolute top-0 ml-1 text-[10px] uppercase tracking-[0.16em] text-slate-500"
             style={{ left: `${(x(index) / VIEW_WIDTH) * 100}%` }}
           >
-            S{frame.session}
+            {sessionMarker(frame.session)}
           </span>
         ))}
 
@@ -189,7 +192,7 @@ export function EquityChart({
           >
             <p className="font-semibold text-white">{formatMoney(hovered.equity)}</p>
             <p className="text-slate-400">
-              {formatSignedMoney(hovered.equity - startingBalance)} · S{hovered.session} {hovered.clock}
+              {formatSignedMoney(hovered.equity - startingBalance)} · {sessionMarker(hovered.session)} {hovered.clock}
             </p>
           </div>
         ) : null}

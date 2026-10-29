@@ -172,10 +172,20 @@ export interface ReportGenerationResult {
 }
 
 export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
-export type DeskAgent = "scout" | "filter" | "analyst" | "risk" | "executor" | "logger";
+export type DeskAgent = "scout" | "flow" | "filter" | "analyst" | "risk" | "seat" | "executor" | "logger";
 export type DeskSide = "long" | "short";
+export type DeskDataSource = "synthetic" | "polygon" | "alpaca";
+
+export interface DeskDataSourceInfo {
+  id: DeskDataSource;
+  label: string;
+  available: boolean;
+  detail: string;
+}
 
 export interface DeskConfig {
+  data_source: DeskDataSource;
+  end_date: string | null;
   symbols: string[];
   starting_balance: number;
   risk_per_trade_pct: number;
@@ -192,6 +202,13 @@ export interface DeskConfig {
   sessions: number;
   allowed_setups: DeskSetup[];
   use_journal_priors: boolean;
+  use_trade_flow: boolean;
+  flow_veto: number;
+  use_ai_seat: boolean;
+  ai_seat_budget: number;
+  seat_veto: number;
+  milestones: number[];
+  checkpoint_drawdown_pct: number;
   seed: number | null;
 }
 
@@ -208,6 +225,10 @@ export interface DeskPipelineCounts {
   stops_trailed: number;
   stops_widened: number;
   logger_reasons: number;
+  flow_vetoes: number;
+  seat_reviews: number;
+  seat_vetoes: number;
+  seat_ai_calls: number;
 }
 
 export interface DeskPosition {
@@ -239,6 +260,7 @@ export interface DeskFrame {
   scans: DeskScanMark[];
   pipeline: DeskPipelineCounts;
   halted: boolean;
+  flow: Record<string, number>;
 }
 
 export interface DeskEvent {
@@ -271,10 +293,45 @@ export interface DeskTrade {
   fees: number;
   pnl: number;
   r_multiple: number;
-  exit_reason: "stop" | "trail" | "target" | "bell";
+  exit_reason: "stop" | "trail" | "target" | "bell" | "stopped";
   score: number;
   win_probability: number;
   thesis: string;
+}
+
+export interface DeskCheckpoint {
+  index: number;
+  kind: "milestone" | "drawdown";
+  step: number;
+  session: number;
+  clock: string;
+  equity: number;
+  multiple: number;
+  message: string;
+  decision: "continue" | "stop" | null;
+  decided_step: number | null;
+}
+
+export interface DeskSeatAnswer {
+  id: string;
+  question: string;
+  probability: number;
+  reason: string;
+}
+
+export interface DeskSeatVerdict {
+  step: number;
+  session: number;
+  clock: string;
+  symbol: string;
+  setup: DeskSetup;
+  side: DeskSide;
+  trade_id: string | null;
+  source: "llm" | "heuristic";
+  model: string | null;
+  answers: DeskSeatAnswer[];
+  thesis: string;
+  vetoed: boolean;
 }
 
 export interface DeskSetupEdge {
@@ -343,13 +400,16 @@ export interface DeskRunSummary {
   id: string;
   created_at: string;
   mode: "paper";
-  data_source: "synthetic";
+  data_source: DeskDataSource;
   config: DeskConfig;
   summary: DeskSummary;
 }
 
 export interface DeskRun extends DeskRunSummary {
-  bars_per_session: number;
+  session_labels: string[];
+  /** Scheduled bars per session; a live session has fewer frames than this until the close. */
+  session_lengths: number[];
+  checkpoints: DeskCheckpoint[];
   pipeline: DeskPipelineCounts;
   setup_edges: DeskSetupEdge[];
   kill_reasons: DeskKillReason[];
@@ -357,5 +417,151 @@ export interface DeskRun extends DeskRunSummary {
   frames: DeskFrame[];
   events: DeskEvent[];
   monte_carlo: DeskMonteCarlo | null;
+  disclaimer: string;
+  flow_source: string;
+  seat_verdicts: DeskSeatVerdict[];
+  /** Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`. */
+  tape: Record<string, number[][]>;
+}
+
+export type DeskLiveStatus = "scheduled" | "running" | "awaiting_decision" | "stopping" | "stopped" | "closed" | "error";
+
+export interface DeskLiveSession {
+  id: string;
+  created_at: string;
+  status: DeskLiveStatus;
+  session_date: string;
+  config: DeskConfig;
+  last_tick_at: string | null;
+  next_bar_at: string | null;
+  message: string | null;
+  notify_channel: "ntfy" | "discord" | "slack" | null;
+  notify_error: string | null;
+  open_checkpoint: DeskCheckpoint | null;
+  run_id: string | null;
+  result: DeskRun | null;
+}
+
+export type BinaryAsset = "BTC" | "ETH" | "SOL" | "XRP" | "DOGE";
+export type BinarySide = "up" | "down";
+
+export interface BinaryConfig {
+  assets: BinaryAsset[];
+  data_source: "synthetic" | "coinbase";
+  end_at: string | null;
+  hours: number;
+  starting_balance: number;
+  shares_per_level: number;
+  levels: number;
+  level_step_cents: number;
+  half_spread_cents: number;
+  max_shares_per_side: number;
+  inventory_skew_cents: number;
+  stop_quoting_minutes: number;
+  queue_fill_probability: number;
+  maker_fee_bps: number;
+  crowd_lag_minutes: number;
+  crowd_noise_cents: number;
+  dislocation_half_life_minutes: number;
+  crowd_spread_cents: number;
+  seed: number | null;
+}
+
+export interface BinaryMinute {
+  t: string;
+  equity: number;
+  fills: number;
+  inventory: Record<string, number>;
+}
+
+export interface BinaryAssetSeries {
+  asset: BinaryAsset;
+  price: number[];
+  fair_up: number[];
+  crowd_up: number[];
+  bid_up: (number | null)[];
+  bid_down: (number | null)[];
+}
+
+export interface BinaryWindow {
+  asset: BinaryAsset;
+  index: number;
+  start: string;
+  end: string;
+  start_minute: number;
+  open: number;
+  close: number;
+  outcome: BinarySide;
+  up_shares: number;
+  down_shares: number;
+  up_cost: number;
+  down_cost: number;
+  pairs: number;
+  avg_pair_cost: number | null;
+  unpaired_side: BinarySide | null;
+  unpaired_shares: number;
+  fees: number;
+  pnl: number;
+  fills: number;
+}
+
+export interface BinaryFill {
+  t: string;
+  minute: number;
+  asset: BinaryAsset;
+  window_index: number;
+  side: BinarySide;
+  price: number;
+  shares: number;
+  level: number;
+  fair_up: number;
+  crowd_up: number;
+}
+
+export interface BinarySummary {
+  starting_balance: number;
+  ending_balance: number;
+  net_pnl: number;
+  return_pct: number;
+  windows: number;
+  windows_won: number;
+  window_win_rate: number | null;
+  fills: number;
+  fills_per_hour: number;
+  pairs_locked: number;
+  paired_share_pct: number | null;
+  avg_pair_cost: number | null;
+  paired_pnl: number;
+  unpaired_pnl: number;
+  fees: number;
+  max_drawdown_pct: number;
+}
+
+export interface BinaryBaseline {
+  net_pnl: number;
+  fills: number;
+  pairs_locked: number;
+  window_win_rate: number | null;
+}
+
+export interface BinaryRunSummary {
+  id: string;
+  created_at: string;
+  mode: "paper";
+  data_source: "synthetic" | "coinbase";
+  config: BinaryConfig;
+  summary: BinarySummary;
+  baseline: BinaryBaseline;
+}
+
+export interface BinaryRun extends BinaryRunSummary {
+  minutes: BinaryMinute[];
+  series: BinaryAssetSeries[];
+  windows: BinaryWindow[];
+  fills: BinaryFill[];
+  fill_arrival: number[];
+  dislocation_half_life_minutes: number | null;
+  monte_carlo: DeskMonteCarlo | null;
+  notes: string[];
   disclaimer: string;
 }

@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
-import type { DeskConfig, DeskRun, DeskRunSummary } from "@tradenoc/types";
+import type { DeskConfig, DeskDataSourceInfo, DeskLiveSession, DeskRun, DeskRunSummary } from "@tradenoc/types";
 import { Card } from "@tradenoc/ui";
 import { EquityChart, KillReasonBars, MonteCarloFan, ScoutRadar } from "@/components/desk-charts";
+import { LIVE_ACTIVE, LiveBar, LiveControl, useLiveSession } from "@/components/desk-live";
+import { AgentCards, AlertBanner, CandlestickChart, MilestoneLadder, TickerStrip } from "@/components/desk-visuals";
 import {
   ActivityFeed,
   ClaimCheckCard,
@@ -14,6 +16,7 @@ import {
   PipelineStrip,
   PositionsPanel,
   RunHistory,
+  SeatVerdicts,
   SetupEdgeBoard,
   StatTile,
 } from "@/components/desk-panels";
@@ -21,12 +24,17 @@ import { StatePanel } from "@/components/state-panels";
 import {
   DESK_AGENTS,
   FALLBACK_DESK_CONFIG,
+  PROVIDER_NAMES,
+  TAPE_LABELS,
   deriveView,
   formatMoney,
   formatPercent,
   formatR,
   formatSigned,
   formatSignedMoney,
+  replayRangeLabel,
+  sessionLabel,
+  shortSessionLabel,
   splitMoney,
   toneFor,
 } from "@/lib/desk";
@@ -38,6 +46,9 @@ const SPEEDS = [
   { label: "12×", bars: 12 },
 ];
 const KELLY_LABELS: Record<number, string> = { 0.1: "1/10", 0.25: "1/4", 0.5: "1/2", 1: "full" };
+const FALLBACK_SOURCES: DeskDataSourceInfo[] = [
+  { id: "synthetic", label: "Synthetic tape", available: true, detail: "Seeded random market with no edge built in." },
+];
 
 function summarySkeleton(run: DeskRun): DeskRunSummary {
   return {
@@ -63,16 +74,28 @@ function Panel({ title, subtitle, children, className }: { title: string; subtit
 export function DeskWorkspace({
   defaults,
   runs: initialRuns,
+  sources,
   initialRun,
+  initialLive,
+  preferLive,
 }: {
   defaults: DeskConfig | null;
   runs: DeskRunSummary[];
+  sources: DeskDataSourceInfo[];
   initialRun: DeskRun | null;
+  initialLive: DeskLiveSession | null;
+  preferLive: boolean;
 }) {
   const [config, setConfig] = useState<DeskConfig>(() => ({ ...(initialRun?.config ?? defaults ?? FALLBACK_DESK_CONFIG), seed: null }));
   const [runs, setRuns] = useState(initialRuns);
-  const [run, setRun] = useState<DeskRun | null>(initialRun);
-  const [step, setStep] = useState(() => (initialRun ? initialRun.frames.length - 1 : 0));
+  const [savedRun, setSavedRun] = useState<DeskRun | null>(initialRun);
+  const session = useLiveSession(initialLive);
+  const [viewingLive, setViewingLive] = useState(
+    () => preferLive && initialLive !== null && LIVE_ACTIVE.includes(initialLive.status) && Boolean(initialLive.result?.frames.length),
+  );
+  const liveResult = session.live?.result ?? null;
+  const run = viewingLive && liveResult?.frames.length ? liveResult : savedRun;
+  const [step, setStep] = useState(() => (run ? run.frames.length - 1 : 0));
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(SPEEDS[0].bars);
   const [rulesOpen, setRulesOpen] = useState(!initialRun);
@@ -99,6 +122,45 @@ export function DeskWorkspace({
   }, [playing, step, lastStep]);
 
   const view = useMemo(() => (run ? deriveView(run, step) : null), [run, step]);
+
+  // In live view, each newly closed bar animates in when the desk was already showing the latest one.
+  const liveFrames = liveResult?.frames.length ?? 0;
+  const seenLiveFrames = useRef(liveFrames);
+  useEffect(() => {
+    const previous = seenLiveFrames.current;
+    seenLiveFrames.current = liveFrames;
+    if (!viewingLive || liveFrames === 0 || liveFrames <= previous) {
+      return;
+    }
+    setStep((current) => {
+      if (previous > 0 && current >= previous - 1) {
+        setPlaying(true);
+        return previous - 1;
+      }
+      return current;
+    });
+  }, [liveFrames, viewingLive]);
+
+  function showLive() {
+    if (!liveResult?.frames.length) {
+      return;
+    }
+    setViewingLive(true);
+    setPlaying(false);
+    setStep(liveResult.frames.length - 1);
+  }
+
+  // Follow a live session the moment one is started from this page.
+  const followedLiveId = useRef(initialLive?.id ?? null);
+  useEffect(() => {
+    const id = session.live?.id ?? null;
+    if (id && id !== followedLiveId.current) {
+      followedLiveId.current = id;
+      setViewingLive(true);
+      setPlaying(false);
+      setStep(Math.max((session.live?.result?.frames.length ?? 1) - 1, 0));
+    }
+  }, [session.live]);
 
   function rememberRun(runId: string) {
     const url = new URL(window.location.href);
@@ -129,7 +191,8 @@ export function DeskWorkspace({
         setError(detail || "The desk could not run. Check that the API is reachable.");
         return;
       }
-      setRun(data);
+      setSavedRun(data);
+      setViewingLive(false);
       setRuns((current) => [summarySkeleton(data), ...current.filter((item) => item.id !== data.id)]);
       setStep(0);
       setPlaying(true);
@@ -143,7 +206,7 @@ export function DeskWorkspace({
   }
 
   async function openRun(runId: string) {
-    if (runId === run?.id) {
+    if (runId === run?.id && !viewingLive) {
       return;
     }
     setError(null);
@@ -155,7 +218,8 @@ export function DeskWorkspace({
         return;
       }
       const data = (await response.json()) as DeskRun;
-      setRun(data);
+      setSavedRun(data);
+      setViewingLive(false);
       setPlaying(false);
       setStep(data.frames.length - 1);
       setConfig({ ...data.config, seed: null });
@@ -177,7 +241,21 @@ export function DeskWorkspace({
   const { whole, cents } = splitMoney(balance);
   const pnlTone = view ? toneFor(view.pnl) : "flat";
   const sessionCount = run?.config.sessions ?? config.sessions;
-  const statusLabel = !run ? "Idle" : playing ? "Live replay" : view?.isComplete ? "Session closed" : "Paused";
+  const statusLabel = viewingLive
+    ? session.live?.status === "running"
+      ? "Live"
+      : "Live session"
+    : !run
+      ? "Idle"
+      : playing
+        ? "Live replay"
+        : view?.isComplete
+          ? "Session closed"
+          : "Paused";
+  const replayRange = run ? replayRangeLabel(run) : null;
+  const tapeLabel = run
+    ? `${TAPE_LABELS[run.data_source]}${replayRange ? ` · ${replayRange}` : ""}`
+    : TAPE_LABELS[config.data_source];
 
   return (
     <div className="grid gap-4">
@@ -196,6 +274,10 @@ export function DeskWorkspace({
           <div>
             <h2 className="text-base font-semibold text-white">Desk rules</h2>
             <p className="mt-1 text-xs text-slate-400">
+              {config.data_source === "synthetic"
+                ? "Synthetic tape"
+                : `${PROVIDER_NAMES[config.data_source]} bars through ${config.end_date ?? "yesterday"}`}{" "}
+              ·{" "}
               {config.symbols.length ? config.symbols.join(" · ") : "Watchlist symbols"} · {config.risk_per_trade_pct}% risk ·{" "}
               {KELLY_LABELS[config.kelly_fraction] ?? config.kelly_fraction} Kelly · max {config.max_open_positions} open ·{" "}
               {config.max_daily_loss_pct}% daily stop · {config.sessions} session{config.sessions === 1 ? "" : "s"}
@@ -222,7 +304,7 @@ export function DeskWorkspace({
         </div>
         {rulesOpen ? (
           <div className="mt-5 border-t border-white/10 pt-5">
-            <DeskRulesForm config={config} onChange={setConfig} />
+            <DeskRulesForm config={config} sources={sources.length ? sources : FALLBACK_SOURCES} onChange={setConfig} />
           </div>
         ) : null}
         {error ? (
@@ -232,20 +314,101 @@ export function DeskWorkspace({
         ) : null}
       </Card>
 
+      <LiveControl
+        live={session.live}
+        available={sources.some((source) => source.id === "alpaca" && source.available)}
+        config={config}
+        session={session}
+        viewingLive={viewingLive}
+        onView={showLive}
+      />
+
       <section
         className="relative overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(52,211,153,0.16),transparent_45%),radial-gradient(circle_at_90%_10%,rgba(103,232,249,0.14),transparent_40%),linear-gradient(180deg,#0b1424,#050a14)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.55)]"
         aria-label="Agent desk console"
       >
+        {run && view ? (
+          <div className="mb-4">
+            <TickerStrip run={run} view={view} step={step} />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="font-mono text-2xl font-semibold tabular-nums text-white">{frame?.clock ?? "09:30"}</p>
           <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs text-slate-300">
             <span className={clsx("h-1.5 w-1.5 rounded-full", playing ? "bg-cyan-300 motion-safe:animate-pulse" : "bg-slate-500")} />
-            {frame ? `session ${frame.session} of ${sessionCount}` : "paper session"}
+            {frame && run ? `${sessionLabel(run, frame.session)} · ${frame.session} of ${sessionCount}` : "paper session"}
           </span>
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-white">{DESK_AGENTS.length}</span> agents
           </p>
         </div>
+
+        {viewingLive && session.live && view ? (
+          <LiveBar
+            live={session.live}
+            onReplay={() => {
+              setStep(0);
+              setPlaying(true);
+            }}
+          />
+        ) : run && view ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => (view.isComplete ? replay() : setPlaying((value) => !value))}
+            className="rounded-full border border-white/15 px-4 py-1.5 text-sm font-medium text-white transition hover:border-cyan-300/60"
+          >
+            {view.isComplete ? "Replay" : playing ? "Pause" : "Play"}
+          </button>
+          <div className="flex rounded-full border border-white/10 p-0.5" role="group" aria-label="Replay speed">
+            {SPEEDS.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => setSpeed(option.bars)}
+                aria-pressed={speed === option.bars}
+                className={clsx(
+                  "rounded-full px-3 py-1 text-xs transition",
+                  speed === option.bars ? "bg-white/10 text-white" : "text-slate-400 hover:text-white",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={lastStep}
+            value={step}
+            onChange={(event) => {
+              setPlaying(false);
+              setStep(event.target.valueAsNumber);
+            }}
+            className="min-w-[10rem] flex-1 accent-cyan-300"
+            aria-label="Replay position"
+          />
+          <span className="font-mono text-xs tabular-nums text-slate-400">
+            bar {step + 1}/{lastStep + 1}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setPlaying(false);
+              setStep(lastStep);
+            }}
+            className="text-xs text-slate-400 underline-offset-2 hover:text-white hover:underline"
+          >
+            Skip to end
+          </button>
+        </div>
+        ) : null}
+
+        {run ? (
+          <div className="mt-3">
+            <AlertBanner events={run.events} step={frame?.step ?? 0} />
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-5 md:grid-cols-[1fr_auto]">
           <div>
@@ -259,7 +422,7 @@ export function DeskWorkspace({
               <div>
                 <p className="text-2xl font-semibold text-white">Agent Desk</p>
                 <p className="text-xs text-slate-400">
-                  Paper · synthetic tape · {(run?.config ?? config).risk_per_trade_pct}% risk · max{" "}
+                  Paper · {tapeLabel} · {(run?.config ?? config).risk_per_trade_pct}% risk · max{" "}
                   {(run?.config ?? config).max_open_positions} open
                 </p>
               </div>
@@ -329,7 +492,8 @@ export function DeskWorkspace({
               currentIndex={step}
               startingBalance={run.summary.starting_balance}
               trades={view.closedTrades}
-              barsPerSession={run.bars_per_session}
+              sessionMarker={(session) => shortSessionLabel(run, session)}
+              totalSteps={run.session_lengths?.reduce((total, length) => total + length, 0) || run.frames.length}
             />
           </div>
         ) : (
@@ -338,12 +502,30 @@ export function DeskWorkspace({
           </div>
         )}
 
+        {run && view ? (
+          <div className="mt-4">
+            <MilestoneLadder run={run} view={view} />
+          </div>
+        ) : null}
+
         <div className="mt-4">
           <PipelineStrip frame={frame} events={run?.events ?? []} active={playing} />
         </div>
 
         {run && view ? (
           <>
+            <div className="mt-4">
+              <AgentCards run={run} step={step} />
+            </div>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-semibold text-white">Tape</p>
+                <p className="text-xs text-slate-400">
+                  5-minute candles · {sessionLabel(run, frame?.session ?? 1)} · flow from {run.flow_source ?? "bar proxy"}
+                </p>
+              </div>
+              <CandlestickChart run={run} step={step} />
+            </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <PositionsPanel frame={frame} run={run} />
               <ClosedTradesPanel trades={view.closedTrades} wins={view.wins} losses={view.losses} />
@@ -367,64 +549,14 @@ export function DeskWorkspace({
               />
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-              <button
-                type="button"
-                onClick={() => (view.isComplete ? replay() : setPlaying((value) => !value))}
-                className="rounded-full border border-white/15 px-4 py-1.5 text-sm font-medium text-white transition hover:border-cyan-300/60"
-              >
-                {view.isComplete ? "Replay" : playing ? "Pause" : "Play"}
-              </button>
-              <div className="flex rounded-full border border-white/10 p-0.5" role="group" aria-label="Replay speed">
-                {SPEEDS.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    onClick={() => setSpeed(option.bars)}
-                    aria-pressed={speed === option.bars}
-                    className={clsx(
-                      "rounded-full px-3 py-1 text-xs transition",
-                      speed === option.bars ? "bg-white/10 text-white" : "text-slate-400 hover:text-white",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={lastStep}
-                value={step}
-                onChange={(event) => {
-                  setPlaying(false);
-                  setStep(event.target.valueAsNumber);
-                }}
-                className="min-w-[10rem] flex-1 accent-cyan-300"
-                aria-label="Replay position"
-              />
-              <span className="font-mono text-xs tabular-nums text-slate-400">
-                bar {step + 1}/{lastStep + 1}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlaying(false);
-                  setStep(lastStep);
-                }}
-                className="text-xs text-slate-400 underline-offset-2 hover:text-white hover:underline"
-              >
-                Skip to end
-              </button>
-            </div>
           </>
         ) : null}
 
         <div className="mt-4 flex flex-wrap justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-slate-500">
-          <span>Paper session · synthetic tape · not financial advice</span>
+          <span>Paper session · {tapeLabel} · not financial advice</span>
           <span>
             TradeReviewDesk · {(run?.config ?? config).risk_per_trade_pct}% rule
-            {run ? ` · seed ${run.config.seed}` : ""}
+            {run?.data_source === "synthetic" ? ` · seed ${run.config.seed}` : ""}
           </span>
         </div>
       </section>
@@ -443,6 +575,13 @@ export function DeskWorkspace({
               )}
             </Panel>
           </div>
+
+          <Panel
+            title="Skeptic seat"
+            subtitle={`Four risk questions on every sized order; a ${formatPercent(run.config.seat_veto)} answer vetoes it. ${run.pipeline.seat_ai_calls} AI call${run.pipeline.seat_ai_calls === 1 ? "" : "s"} this run.`}
+          >
+            <SeatVerdicts verdicts={run.seat_verdicts ?? []} step={frame?.step ?? 0} threshold={run.config.seat_veto} />
+          </Panel>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel
@@ -488,7 +627,7 @@ export function DeskWorkspace({
         <Panel title="Screenshot reality check" subtitle="Viral bot posts rarely show the math. This does.">
           <ClaimCheckCard run={run} />
         </Panel>
-        <Panel title="Saved sessions" subtitle="Same seed and rules replay exactly.">
+        <Panel title="Saved sessions" subtitle="The same rules on the same seed or dates replay exactly.">
           <RunHistory runs={runs} activeId={run?.id ?? null} onSelect={openRun} loadingId={loadingId} />
         </Panel>
       </div>
@@ -497,7 +636,7 @@ export function DeskWorkspace({
         title="Paper only, on purpose"
         message={
           run?.disclaimer ??
-          "The desk runs your rules against a synthetic market tape with paper fills. It never places real orders and its results are not evidence of real-world profitability."
+          "The desk runs your rules with paper fills on a synthetic tape or real historical bars. It never places real orders, and its results are not evidence of future profitability."
         }
         tone="warning"
       />

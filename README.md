@@ -16,7 +16,7 @@ TradeReviewDesk is an AI-powered workflow platform for self-directed traders. Th
 
 TradeReviewDesk is not a signal service, not a brokerage, and not an auto-execution tool. The UI and API scaffolds intentionally frame outputs as workflow support, review assistance, and process discipline.
 
-The Agent Desk (below) keeps that boundary: it rehearses your rules on a synthetic tape with paper fills and has no path to a broker.
+The Agent Desk (below) keeps that boundary: it rehearses your rules with paper fills, on a synthetic tape or real historical bars, and has no path to a broker.
 
 ## Quick start
 
@@ -172,20 +172,22 @@ For any hosted environment, use absolute HTTPS URLs and configure the web and AP
 
 ## Agent Desk (paper)
 
-`/app/desk` runs a six-agent pipeline over your rules, bar by bar, and replays it like a live session:
+`/app/desk` runs an eight-agent pipeline over your rules, bar by bar, and replays it like a live session:
 
 | Agent | Job |
 |---|---|
 | Scout | Scans each closed 5-minute bar for breakouts, liquidity sweeps that reclaim, trend pullbacks, and mean-reversion stretches |
-| Filter | Kills setups that break your hard rules: opening/closing windows, daily loss limit, loss-streak cooldown, symbol already working, max open positions, stop distance, minimum reward:risk |
+| Flow | Keeps a 24-bar decaying memory of buy vs sell volume per symbol: tick-rule classified IEX trade prints on Alpaca, a labelled bar proxy elsewhere |
+| Filter | Kills setups that break your hard rules: opening/closing windows, daily loss limit, loss-streak cooldown, symbol already working, max open positions, stop distance, minimum reward:risk, and continuation setups fighting strong flow |
 | Analyst | Scores survivors and keeps a Beta-posterior win rate per setup: a stated starting assumption, plus your tagged journal trades, plus this run's results |
 | Risk | Sizes each trade with the smaller of your risk cap and fractional Kelly, splits buying power across open slots, and trails stops (tighten only) |
+| Skeptic | Answers four yes/no risk questions with probabilities on each sized order (your LLM within a per-run budget, else a built-in scorer) and vetoes above your threshold |
 | Executor | Paper fills at the next bar's open with slippage and fees; stop is checked before target inside a bar; flat by the bell |
 | Logger | Records a reason for every decision so a run can be audited |
 
 What makes it honest rather than a screenshot generator:
 
-- **Synthetic tape, no edge baked in.** `apps/api/app/services/desk/market.py` is a seeded regime-switching random walk with intraday volatility and rare gaps. Results show how your rules behave in noise, not what they would earn.
+- **Two tapes.** The synthetic tape (`apps/api/app/services/desk/market.py`) is a seeded regime-switching random walk with no edge baked in, so results show how your rules behave in noise. The Polygon tape replays real split-adjusted 5-minute bars for completed sessions (see below).
 - **No lookahead.** Setups are detected on a closed bar and filled at the next open; tests assert it.
 - **Stops never widen.** The "stops widened" stat is audited per trade, not hard-coded.
 - **Deterministic.** Same seed and rules give the identical run, so sessions can be replayed and compared.
@@ -193,7 +195,40 @@ What makes it honest rather than a screenshot generator:
 
 API: `GET /api/v1/desk/defaults`, `POST /api/v1/desk/runs`, `GET /api/v1/desk/runs`, `GET /api/v1/desk/runs/{id}`. Runs persist in the `desk_runs` table (migration `0009_desk_runs`), or in the JSON store in file mode (last 5 per user).
 
-Plugging in real data later means implementing the `SimulatedMarketFeed.session_bars(symbol, session)` shape against a market-data provider; the agents only see `Bar` objects.
+API also exposes `GET /api/v1/desk/sources`, which reports whether historical data is available.
+
+### Historical replays (Alpaca or Polygon)
+
+Set `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` (recommended) or `POLYGON_API_KEY` on the API; free plans work for both. Then choose the provider under Desk rules → Market data and pick the last session to replay.
+
+- Alpaca bars come from `/v2/stocks/bars` (5-minute, split-adjusted, consolidated SIP feed for completed days). One request covers every symbol, and the free plan allows 200 requests a minute.
+- Polygon bars come from `/v2/aggs` 5-minute aggregates, split-adjusted, with the key sent as a bearer header. Polygon now operates as Massive; set `POLYGON_BASE_URL` if its API host changes.
+- Only NYSE regular hours are replayed (09:30–16:00 ET). Holidays drop out because they have no bars, and the scheduled 1:00 pm early closes (July 3, the day after Thanksgiving, December 24) replay as shorter sessions.
+- One extra trading day before the first session is loaded as indicator warmup and never traded.
+- A 5-minute slot with no trades becomes a flat, zero-volume bar at the last close. Symbols with fewer than half their slots traded on any replayed day are dropped, and the Logger says so.
+- Each symbol's window is cached on disk (`MARKET_DATA_CACHE_DIR`) once fetched, so replays cost no requests. If Polygon's 5-requests-a-minute free limit is hit, symbols already loaded stay cached and the next run picks up the rest.
+- Fills are still simulated at the next bar's open with your slippage and fees, so historical results show how the rules behaved on those days, not what live execution would have returned.
+
+The agents only see `Bar` objects through the `MarketFeed` protocol in `market.py`, so another provider fits behind the same shape.
+
+### Live paper mode
+
+With Alpaca keys set, **Live paper session** on the Agent Desk runs today's market bar by bar from Alpaca's free real-time IEX feed. Fills are still paper; nothing reaches a broker.
+
+- **Recomputed, not stateful.** A live session stores its market data so far, a snapshot of its journal priors and AI seat verdicts, and your decisions. Every tick fetches only what is new and reruns the deterministic engine over the whole day, so earlier bars never change and a restart can't corrupt it. The previous trading day loads as indicator warmup.
+- **Keep-running checkpoints.** Each milestone crossed (Desk rules → Milestones) and one drawdown level (`checkpoint_drawdown_pct`) pause new entries. Open positions keep their stops. **Keep running** resumes entries from the next bar. **Stop for today** (any time) flattens at the next bar's open. Finished sessions are saved to run history.
+- **Notifications.** Paste an ntfy.sh topic (a free phone app), a Discord webhook, or a Slack incoming webhook when starting. Checkpoints, a daily-loss halt, and the close each send one message. Only those hosts are accepted. Browser alerts are available while the tab is open.
+- **Ticking.** Loading the desk ticks a session that has missed a bar. For updates and notifications with no browser open, run the worker: `python -m app.workers.desk_live_worker` (see `DEPLOYMENT_ENV_MATRIX.md`).
+- **Migration.** `0010_desk_live_sessions` adds the `desk_live_sessions` table.
+
+## Binary desk (paper)
+
+`/app/binary` simulates a two-sided grid on 15-minute crypto Up/Down markets (BTC, ETH, SOL, XRP, DOGE), the style of bot in viral "prediction market" screenshots.
+
+- **Real underlying, modeled market.** Fair P(up) comes from 1-minute candles: Coinbase's public candles API (no key; `COINBASE_BASE_URL` to override) or a seeded synthetic tape. Each window resolves on the real close. The prediction market itself is modeled: the crowd's price is fair value seen `crowd_lag_minutes` late plus mean-reverting noise, and a resting bid fills only when the crowd trades through it, at `queue_fill_probability`.
+- **The grid.** Bids on both sides so that each minute's quotes would lock a pair under $1, shaded against inventory, capped per side, and pulled a few minutes before each close. Pairs filled in different minutes can still cost more than $1 when fair value moves between fills; the run reports that.
+- **Efficient-crowd baseline.** Every run is repeated against a crowd with no lag and no noise. In testing, the default one-minute lag is what turns a losing grid into a winning one; the console puts both numbers side by side.
+- API: `GET /api/v1/binary/defaults`, `POST /api/v1/binary/runs`, `GET /api/v1/binary/runs`, `GET /api/v1/binary/runs/{id}`; runs persist in `binary_runs` (migration `0011_binary_runs`).
 
 ## MVP coverage in this scaffold
 
@@ -204,11 +239,12 @@ Plugging in real data later means implementing the `SimulatedMarketFeed.session_
 - SQLAlchemy models aligned to the startup brief schema
 - Pydantic and Zod schemas for report payloads
 - job-based report pipeline, CSV import validation, and Stripe-ready billing scaffolding
-- paper Agent Desk with deterministic synthetic tape, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
+- paper Agent Desk: eight agents (including order flow and an AI Skeptic seat), synthetic or Alpaca/Polygon historical bars, live paper mode with keep-running checkpoints and notifications, replayable runs, and a Monte Carlo expectancy fan
+- paper Binary desk: two-sided grid on modeled 15-minute crypto Up/Down markets with an efficient-crowd baseline
 
 ## Next implementation steps
 
 1. Expand billing from stub-safe local mode into live Stripe checkout and webhook deployment config
 2. Add token usage and per-report cost instrumentation around the live LLM path
 3. Extend automated tests into hosted-environment and browser-level workflows
-4. Agent Desk: replay real historical bars through a market-data provider behind the feed interface, then decide whether a broker paper-trading API belongs in scope before anything touches live execution
+4. Agent Desk: decide whether a broker paper-trading API belongs in scope before anything touches live execution

@@ -6,10 +6,12 @@ import clsx from "clsx";
 import type {
   DeskAgent,
   DeskConfig,
+  DeskDataSourceInfo,
   DeskEvent,
   DeskFrame,
   DeskRun,
   DeskRunSummary,
+  DeskSeatVerdict,
   DeskSetupEdge,
   DeskTrade,
 } from "@tradenoc/types";
@@ -24,6 +26,8 @@ import {
   formatRunLabel,
   formatSigned,
   formatSignedMoney,
+  latestReplayableDay,
+  PROVIDER_NAMES,
 } from "@/lib/desk";
 
 const iconPaths: Record<DeskAgent, ReactNode> = {
@@ -31,6 +35,13 @@ const iconPaths: Record<DeskAgent, ReactNode> = {
     <>
       <circle cx="11" cy="11" r="6" />
       <path d="m20 20-4.5-4.5" />
+    </>
+  ),
+  flow: <path d="M3 8h11l-3-3M21 16H10l3 3" />,
+  seat: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.2-3.6 3.8-5.5 7-5.5s5.8 1.9 7 5.5M16.5 4.5l2-2" />
     </>
   ),
   filter: <path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5Z" />,
@@ -61,6 +72,8 @@ export function AgentIcon({ agent, className }: { agent: DeskAgent; className?: 
     </svg>
   );
 }
+
+const AGENT_LABELS = Object.fromEntries(DESK_AGENTS.map((agent) => [agent.id, agent.label])) as Record<DeskAgent, string>;
 
 function agentForScan(status: "killed" | "ordered"): DeskAgent {
   return status === "ordered" ? "executor" : "filter";
@@ -97,7 +110,7 @@ export function PipelineStrip({ frame, events, active }: { frame: DeskFrame | nu
             <span className="block h-full w-10 rounded-full bg-cyan-300/80 blur-[1px] motion-safe:animate-[desk-flow_1.6s_linear_infinite]" />
           </div>
         ) : null}
-        <ol className="relative grid grid-cols-3 gap-y-4 sm:grid-cols-6">
+        <ol className="relative grid grid-cols-4 gap-y-4 sm:grid-cols-8">
           {DESK_AGENTS.map((agent) => (
             <li key={agent.id} className="flex flex-col items-center text-center" title={agent.role}>
               <div className="flex h-5 items-end gap-1">
@@ -219,6 +232,7 @@ const exitLabels: Record<DeskTrade["exit_reason"], string> = {
   trail: "trailed stop",
   target: "target",
   bell: "flat at bell",
+  stopped: "you stopped the desk",
 };
 
 export function ClosedTradesPanel({ trades, wins, losses }: { trades: DeskTrade[]; wins: number; losses: number }) {
@@ -302,7 +316,7 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
                 : "border-white/10 text-slate-400 hover:border-white/25 hover:text-slate-200",
             )}
           >
-            {agent}
+            {agent === "all" ? "All" : AGENT_LABELS[agent]}
           </button>
         ))}
       </div>
@@ -316,7 +330,7 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
             </span>
             <span className="hidden items-center gap-1 capitalize text-slate-300 sm:flex">
               <AgentIcon agent={event.agent} className="h-3.5 w-3.5 text-slate-400" />
-              {event.agent}
+              {AGENT_LABELS[event.agent]}
             </span>
             <span className="text-slate-300">
               <AgentIcon agent={event.agent} className="mr-1 inline h-3.5 w-3.5 align-[-2px] text-slate-400 sm:hidden" />
@@ -327,6 +341,65 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
         ))}
       </ol>
     </div>
+  );
+}
+
+const SEAT_SHORT_LABELS: Record<string, string> = {
+  chasing: "Chasing",
+  noise_stop: "Stop in noise",
+  against_context: "Against context",
+  thin_volume: "Thin volume",
+};
+
+export function SeatVerdicts({ verdicts, step, threshold }: { verdicts: DeskSeatVerdict[]; step: number; threshold: number }) {
+  const visible = verdicts.filter((verdict) => verdict.step <= step).slice(-4).reverse();
+  if (visible.length === 0) {
+    return <p className="text-sm text-slate-500">No orders have reached the seat yet.</p>;
+  }
+
+  return (
+    <ul className="space-y-4">
+      {visible.map((verdict) => (
+        <li key={`${verdict.step}-${verdict.symbol}-${verdict.setup}`} className="rounded-xl border border-white/10 bg-slate-950/60 p-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="tabular-nums text-slate-500">
+              S{verdict.session} {verdict.clock}
+            </span>
+            <span className="font-semibold text-white">{verdict.symbol}</span>
+            <span className="text-slate-400">
+              {verdict.side} {SETUP_LABELS[verdict.setup].toLowerCase()}
+            </span>
+            <span
+              className={clsx(
+                "ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                verdict.vetoed ? "border-rose-300/40 bg-rose-400/10 text-rose-100" : "border-emerald-300/40 bg-emerald-400/10 text-emerald-100",
+              )}
+            >
+              {verdict.vetoed ? "Vetoed" : `Passed · ${verdict.trade_id}`}
+            </span>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {verdict.answers.map((answer) => (
+              <li key={answer.id} className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2 text-[11px]" title={`${answer.question} ${answer.reason}`}>
+                <span className="text-slate-400">{SEAT_SHORT_LABELS[answer.id] ?? answer.id}</span>
+                <span className="relative h-2 rounded-full bg-white/10">
+                  <span
+                    className={clsx("absolute inset-y-0 left-0 rounded-full", answer.probability >= threshold ? "bg-rose-400" : "bg-cyan-300/70")}
+                    style={{ width: `${Math.max(answer.probability * 100, 2)}%` }}
+                  />
+                  <span className="absolute inset-y-[-3px] w-px bg-slate-300/70" style={{ left: `${threshold * 100}%` }} />
+                </span>
+                <span className="text-right tabular-nums text-slate-200">{formatPercent(answer.probability)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-slate-300">{verdict.thesis}</p>
+          <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">
+            {verdict.source === "llm" ? `AI model · ${verdict.model ?? "LLM"}` : "Built-in scorer"}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -487,7 +560,7 @@ export function RunHistory({
             <span className="text-slate-400">
               {loadingId === run.id
                 ? "Loading…"
-                : `${run.config.sessions} session${run.config.sessions === 1 ? "" : "s"} · ${run.summary.trades} trades · seed ${run.config.seed}`}
+                : `${runTapeSummary(run)} · ${run.summary.trades} trades`}
             </span>
             <span className="text-right tabular-nums text-slate-400">{run.summary.multiple.toFixed(3)}×</span>
           </button>
@@ -495,6 +568,14 @@ export function RunHistory({
       ))}
     </ul>
   );
+}
+
+function runTapeSummary(run: DeskRunSummary): string {
+  const sessions = `${run.config.sessions} session${run.config.sessions === 1 ? "" : "s"}`;
+  if (run.data_source !== "synthetic") {
+    return `${PROVIDER_NAMES[run.data_source]} · ${sessions} to ${run.config.end_date ?? "?"}`;
+  }
+  return `Synthetic · ${sessions} · seed ${run.config.seed}`;
 }
 
 function NumberField({
@@ -530,18 +611,75 @@ function NumberField({
   );
 }
 
+const POLYGON_FREE_REQUESTS_PER_MINUTE = 5;
+
 export function DeskRulesForm({
   config,
+  sources,
   onChange,
 }: {
   config: DeskConfig;
+  sources: DeskDataSourceInfo[];
   onChange: (config: DeskConfig) => void;
 }) {
   const [symbolsText, setSymbolsText] = useState(config.symbols.join(", "));
   const set = <K extends keyof DeskConfig>(key: K, value: DeskConfig[K]) => onChange({ ...config, [key]: value });
+  const latestDay = latestReplayableDay();
 
   return (
     <div className="grid gap-5">
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Market data</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+          {sources.map((source) => {
+            const selected = config.data_source === source.id;
+            return (
+              <button
+                key={source.id}
+                type="button"
+                disabled={!source.available}
+                aria-pressed={selected}
+                onClick={() =>
+                  onChange({
+                    ...config,
+                    data_source: source.id,
+                    end_date: source.id === "synthetic" ? null : (config.end_date ?? latestDay),
+                  })
+                }
+                className={clsx(
+                  "rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50",
+                  selected ? "border-cyan-300/60 bg-cyan-300/10" : "border-white/10 hover:border-white/25",
+                )}
+              >
+                <span className="block text-sm font-semibold text-white">{source.label}</span>
+                <span className="mt-1 block text-xs text-slate-400">{source.detail}</span>
+              </button>
+            );
+          })}
+        </div>
+        {config.data_source !== "synthetic" ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_2fr] sm:items-end">
+            <label className="grid gap-1 text-xs text-slate-400">
+              Replay through (last session)
+              <input
+                type="date"
+                value={config.end_date ?? latestDay}
+                max={latestDay}
+                onChange={(event) => set("end_date", event.target.value || null)}
+                className={fieldClass}
+              />
+            </label>
+            <p className="text-xs text-slate-400">
+              Replays the {config.sessions} trading day{config.sessions === 1 ? "" : "s"} up to this date, plus the day before
+              as indicator warmup. Weekends and holidays are skipped.
+              {config.data_source === "polygon" && config.symbols.length > POLYGON_FREE_REQUESTS_PER_MINUTE
+                ? ` Polygon's free plan loads ${POLYGON_FREE_REQUESTS_PER_MINUTE} symbols a minute; extra symbols may need a second run a minute later.`
+                : ""}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr]">
         <label className="grid gap-1 text-xs text-slate-400">
           Symbols (up to 8; blank uses your watchlist)
@@ -562,7 +700,7 @@ export function DeskRulesForm({
           />
         </label>
         <NumberField label="Starting balance ($)" value={config.starting_balance} onChange={(v) => set("starting_balance", v)} step={50} min={50} max={1000000} />
-        <NumberField label="Sessions" value={config.sessions} onChange={(v) => set("sessions", v)} step={1} min={1} max={5} hint="Each session is one synthetic 09:30–16:00 day." />
+        <NumberField label="Sessions" value={config.sessions} onChange={(v) => set("sessions", v)} step={1} min={1} max={5} hint="Each session is one 09:30–16:00 trading day." />
       </div>
 
       <div>
@@ -591,6 +729,20 @@ export function DeskRulesForm({
           <NumberField label="Cool down after N losses" value={config.max_consecutive_losses} onChange={(v) => set("max_consecutive_losses", v)} step={1} min={1} max={10} />
           <NumberField label="Trail stop after (R)" value={config.trail_after_r} onChange={(v) => set("trail_after_r", v)} step={0.25} min={0.5} max={5} />
           <NumberField label="Min reward:risk" value={config.min_reward_risk} onChange={(v) => set("min_reward_risk", v)} step={0.25} min={1} max={5} />
+          <label className="grid gap-1 text-xs text-slate-400 sm:col-span-2" title="Equity multiples shown on the ladder. In live mode each one is a keep-running checkpoint.">
+            Milestones (equity multiples)
+            <input
+              defaultValue={config.milestones.join(", ")}
+              onBlur={(event) => {
+                const values = event.target.value
+                  .split(/[\s,]+/)
+                  .map(Number)
+                  .filter((value) => Number.isFinite(value) && value > 1);
+                set("milestones", values.length ? values.slice(0, 6) : config.milestones);
+              }}
+              className={fieldClass}
+            />
+          </label>
         </div>
       </div>
 
@@ -647,6 +799,63 @@ export function DeskRulesForm({
           />
           Seed the Analyst&apos;s win-rate estimates with my tagged journal trades
         </label>
+      </div>
+
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Skeptic seat</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_1fr_2fr] sm:items-end">
+          <NumberField
+            label="Veto at probability"
+            value={config.seat_veto}
+            onChange={(v) => set("seat_veto", v)}
+            step={0.05}
+            min={0.3}
+            max={1}
+            hint="An order is vetoed when any of the four risk questions is answered at or above this probability. 1 turns vetoes off."
+          />
+          <NumberField
+            label="AI calls per run"
+            value={config.ai_seat_budget}
+            onChange={(v) => set("ai_seat_budget", v)}
+            step={1}
+            min={0}
+            max={30}
+            hint="Each sized order costs one model call until the budget runs out; the built-in scorer answers the rest."
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="accent-cyan-300"
+              checked={config.use_ai_seat}
+              onChange={(event) => set("use_ai_seat", event.target.checked)}
+            />
+            Ask the AI model when an LLM key is configured (adds a second or two per call). Otherwise the built-in scorer answers.
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Order flow</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_3fr] sm:items-end">
+          <NumberField
+            label="Flow veto (imbalance)"
+            value={config.flow_veto}
+            onChange={(v) => set("flow_veto", v)}
+            step={0.05}
+            min={0.05}
+            max={1}
+            hint="Breakouts and trend pullbacks are killed when buy/sell imbalance runs this far against them. 1 turns the veto off."
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="accent-cyan-300"
+              checked={config.use_trade_flow}
+              onChange={(event) => set("use_trade_flow", event.target.checked)}
+            />
+            On Alpaca, read real IEX trade prints for flow (slower first load). Other tapes use a bar-based proxy.
+          </label>
+        </div>
       </div>
     </div>
   );
