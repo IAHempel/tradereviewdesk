@@ -1,0 +1,492 @@
+"""Runs a paper desk session: the six agents stepping bar by bar over a synthetic tape."""
+
+import secrets
+
+from app.schemas.desk import (
+    DeskAgent,
+    DeskConfig,
+    DeskFrame,
+    DeskKillReason,
+    DeskPosition,
+    DeskRunResponse,
+    DeskScanMark,
+    DeskSetup,
+    DeskSetupEdge,
+    DeskTrade,
+)
+from app.schemas.trades import TradeEntryResponse
+from app.services.desk.agents import (
+    JOURNAL_PRIOR_CAP,
+    KILL_LABELS,
+    SETUP_LABELS,
+    SETUP_PRIORS,
+    TILT_COOLDOWN_BARS,
+    AnalystAgent,
+    DeskGate,
+    ExecutorAgent,
+    ExitFill,
+    FilterAgent,
+    LoggerAgent,
+    PaperOrder,
+    PaperPosition,
+    RiskAgent,
+    ScoutAgent,
+    SymbolTape,
+    map_journal_tags,
+)
+from app.services.desk.market import BARS_PER_SESSION, Bar, SimulatedMarketFeed, bar_clock
+from app.services.desk.stats import build_summary, run_monte_carlo
+
+FALLBACK_SYMBOLS = ("SPY", "QQQ", "IWM", "AMD", "MSFT", "TSLA")
+MIN_SYMBOLS = 4
+MAX_DEFAULT_SYMBOLS = 6
+
+
+def resolve_config(config: DeskConfig, watchlist_symbols: list[str]) -> tuple[DeskConfig, list[str]]:
+    """Fills in symbols and seed. Returns the resolved config plus any symbols added as filler."""
+    updates: dict[str, object] = {}
+    added: list[str] = []
+
+    if not config.symbols:
+        symbols = [symbol.upper() for symbol in watchlist_symbols][:MAX_DEFAULT_SYMBOLS]
+        for fallback in FALLBACK_SYMBOLS:
+            if len(symbols) >= MIN_SYMBOLS:
+                break
+            if fallback not in symbols:
+                symbols.append(fallback)
+                added.append(fallback)
+        updates["symbols"] = symbols
+
+    if config.seed is None:
+        updates["seed"] = secrets.randbelow(2**31)
+
+    return config.model_copy(update=updates), added
+
+
+def journal_counts(trades: list[TradeEntryResponse]) -> dict[DeskSetup, tuple[int, int]]:
+    """Wins and losses per desk setup from the user's own tagged journal trades."""
+    tallies: dict[DeskSetup, list[int]] = {}
+    for trade in trades:
+        if trade.pnl is None or trade.pnl == 0:
+            continue
+        setup = map_journal_tags(trade.tags)
+        if setup is None:
+            continue
+        tally = tallies.setdefault(setup, [0, 0])
+        if sum(tally) >= JOURNAL_PRIOR_CAP:
+            continue
+        tally[0 if trade.pnl > 0 else 1] += 1
+    return {setup: (tally[0], tally[1]) for setup, tally in tallies.items()}
+
+
+class DeskSession:
+    def __init__(self, config: DeskConfig, journal: dict[DeskSetup, tuple[int, int]]) -> None:
+        assert config.seed is not None and config.symbols, "resolve_config must run first"
+        self.config = config
+        self.feed = SimulatedMarketFeed(config.symbols, config.seed, config.sessions)
+        self.tapes = {symbol: SymbolTape(symbol) for symbol in config.symbols}
+        self.scout = ScoutAgent()
+        self.filter = FilterAgent(config)
+        self.analyst = AnalystAgent(config, journal)
+        self.risk = RiskAgent(config)
+        self.executor = ExecutorAgent(config)
+        self.logger = LoggerAgent()
+
+        self.realized = 0.0
+        self.fees_paid = 0.0
+        self.orders: dict[str, PaperOrder] = {}
+        self.positions: dict[str, PaperPosition] = {}
+        self.initial_stops: dict[str, float] = {}
+        self.trades: list[DeskTrade] = []
+        self.frames: list[DeskFrame] = []
+        self.trade_returns: list[float] = []
+        self.halted_sessions = 0
+        self.next_trade_number = 1
+
+        self.session = 0
+        self.step = 0
+        self.clock = bar_clock(0)
+        self.halted = False
+        self.cooldown_until = -1
+        self.loss_streak = 0
+
+    def equity(self, marks: dict[str, float]) -> float:
+        unrealized = sum(
+            position.gross_pnl_at(marks[position.order.setup.symbol]) for position in self.positions.values()
+        )
+        return self.config.starting_balance + self.realized + unrealized
+
+    def committed_notional(self) -> float:
+        open_notional = sum(position.entry * position.quantity for position in self.positions.values())
+        pending_notional = sum(order.setup.entry * order.sizing.quantity for order in self.orders.values())
+        return open_notional + pending_notional
+
+    def log(self, agent: DeskAgent, kind: str, message: str, symbol: str | None = None) -> None:
+        self.logger.log(
+            step=self.step, session=self.session, clock=self.clock, agent=agent, kind=kind, message=message, symbol=symbol
+        )
+
+    def run(self) -> DeskRunResponse:
+        for symbol in self.config.symbols:
+            for bar in self.feed.session_bars(symbol, 0):
+                self.tapes[symbol].append(bar)
+
+        self.log(
+            "logger",
+            "session_plan",
+            f"Paper desk armed on {', '.join(self.config.symbols)} with {self.config.risk_per_trade_pct:g}% risk cap, "
+            f"{self.config.kelly_fraction:g} Kelly, max {self.config.max_open_positions} open.",
+        )
+
+        for session in range(1, self.config.sessions + 1):
+            self.run_session(session)
+
+        return self.build_response()
+
+    def run_session(self, session: int) -> None:
+        self.session = session
+        self.halted = False
+        self.cooldown_until = -1
+        self.loss_streak = 0
+        session_bars = {symbol: self.feed.session_bars(symbol, session) for symbol in self.config.symbols}
+        day_start_equity = self.config.starting_balance + self.realized
+
+        for index in range(BARS_PER_SESSION):
+            self.step = (session - 1) * BARS_PER_SESSION + index
+            self.clock = bar_clock(index)
+            bars = {symbol: session_bars[symbol][index] for symbol in self.config.symbols}
+            marks = {symbol: bar.close for symbol, bar in bars.items()}
+
+            self.fill_orders(bars)
+            self.manage_positions(bars, is_last_bar=index == BARS_PER_SESSION - 1)
+            for symbol, bar in bars.items():
+                self.tapes[symbol].append(bar)
+
+            day_pnl = self.equity(marks) - day_start_equity
+            if not self.halted and day_pnl <= -day_start_equity * self.config.max_daily_loss_pct / 100:
+                self.halted = True
+                self.halted_sessions += 1
+                self.log(
+                    "risk",
+                    "halt",
+                    f"Day P&L {day_pnl:+.2f} breached the {self.config.max_daily_loss_pct:g}% daily loss limit. "
+                    "No new entries for the rest of the session; open stops stay in place.",
+                )
+
+            scans = self.scan(index, marks) if index < BARS_PER_SESSION - 1 else []
+            self.frames.append(self.frame(marks, scans))
+
+    def fill_orders(self, bars: dict[str, Bar]) -> None:
+        for symbol, order in list(self.orders.items()):
+            del self.orders[symbol]
+            outcome = self.executor.fill_price(order, bars[symbol])
+            if isinstance(outcome, str):
+                self.logger.counts.executor_cancels += 1
+                self.logger.kill("executor", outcome)
+                self.log("executor", "cancel", f"Order cancelled: {KILL_LABELS[outcome].lower()} at the open.", symbol)
+                continue
+
+            setup = order.setup
+            entry_fee = self.executor.fee(outcome, order.sizing.quantity)
+            position = PaperPosition(
+                trade_id=order.trade_id,
+                order=order,
+                session=self.session,
+                open_step=self.step,
+                opened_at=self.clock,
+                entry=outcome,
+                quantity=order.sizing.quantity,
+                stop=setup.stop,
+                target=setup.target,
+                risk_per_unit=abs(outcome - setup.stop),
+                entry_fee=entry_fee,
+            )
+            self.positions[symbol] = position
+            self.initial_stops[order.trade_id] = setup.stop
+            self.logger.counts.executor_fills += 1
+            self.log(
+                "executor",
+                "fill",
+                f"Paper fill {setup.side} {position.quantity:g} @ {outcome:.2f}, stop {setup.stop:.2f}, target {setup.target:.2f}.",
+                symbol,
+            )
+
+    def manage_positions(self, bars: dict[str, Bar], *, is_last_bar: bool) -> None:
+        for symbol, position in list(self.positions.items()):
+            bar = bars[symbol]
+            exit_fill = self.executor.check_exit(position, bar, self.initial_stops[position.trade_id])
+            if exit_fill is None and is_last_bar:
+                exit_fill = self.executor.bell_exit(position, bar)
+            if exit_fill is not None:
+                self.close_position(position, exit_fill)
+                continue
+
+            tighter = self.executor.trail(position, bar)
+            if tighter is not None:
+                position.stop = tighter
+                self.logger.counts.stops_trailed += 1
+                self.log(
+                    "risk",
+                    "trail",
+                    f"Trailed stop to {tighter:.2f} (locks {position.r_at(tighter):+.2f}R) after a {position.high_water_r:.2f}R run.",
+                    symbol,
+                )
+
+    def close_position(self, position: PaperPosition, exit_fill: ExitFill) -> None:
+        symbol = position.order.setup.symbol
+        del self.positions[symbol]
+        exit_fee = self.executor.fee(exit_fill.price, position.quantity)
+        fees = position.entry_fee + exit_fee
+        pnl = position.gross_pnl_at(exit_fill.price) - fees
+        risk_dollars = position.risk_per_unit * position.quantity
+        r_multiple = pnl / risk_dollars if risk_dollars > 0 else 0.0
+        equity_before = self.config.starting_balance + self.realized
+
+        self.realized += pnl
+        self.fees_paid += fees
+        self.trade_returns.append(pnl / equity_before)
+        self.logger.counts.executor_exits += 1
+
+        won = pnl > 0
+        setup_type = position.order.setup.setup
+        self.analyst.record_outcome(setup_type, won)
+        self.trades.append(
+            DeskTrade(
+                id=position.trade_id,
+                symbol=symbol,
+                side=position.side,
+                setup=setup_type,
+                session=position.session,
+                open_step=position.open_step,
+                close_step=self.step,
+                opened_at=position.opened_at,
+                closed_at=self.clock,
+                entry=round(position.entry, 4),
+                exit=round(exit_fill.price, 4),
+                stop_initial=round(self.initial_stops[position.trade_id], 4),
+                stop_final=round(position.stop, 4),
+                target=round(position.target, 4),
+                quantity=position.quantity,
+                risk_dollars=round(risk_dollars, 2),
+                fees=round(fees, 2),
+                pnl=round(pnl, 2),
+                r_multiple=round(r_multiple, 2),
+                exit_reason=exit_fill.reason,
+                score=position.order.assessment.score,
+                win_probability=round(position.order.assessment.win_probability, 3),
+                thesis=position.order.setup.thesis,
+            )
+        )
+        self.log(
+            "executor",
+            "exit",
+            f"Closed {position.side} on {exit_fill.reason} @ {exit_fill.price:.2f}: {pnl:+.2f} ({r_multiple:+.2f}R).",
+            symbol,
+        )
+        self.log(
+            "analyst",
+            "update",
+            f"{SETUP_LABELS[setup_type]} posterior win rate now {self.analyst.posterior(setup_type):.0%} "
+            f"after a {'win' if won else 'loss'}.",
+            symbol,
+        )
+
+        if won:
+            self.loss_streak = 0
+            return
+
+        self.loss_streak += 1
+        if self.loss_streak >= self.config.max_consecutive_losses:
+            self.cooldown_until = self.step + TILT_COOLDOWN_BARS
+            self.loss_streak = 0
+            self.log(
+                "risk",
+                "cooldown",
+                f"{self.config.max_consecutive_losses} losses in a row. Desk cools down for "
+                f"{TILT_COOLDOWN_BARS * 5} minutes before taking new entries.",
+            )
+
+    def scan(self, index: int, marks: dict[str, float]) -> list[DeskScanMark]:
+        scans: list[DeskScanMark] = []
+        for symbol in self.config.symbols:
+            for setup in self.scout.scan(self.tapes[symbol]):
+                self.logger.counts.scout_flagged += 1
+                label = f"{SETUP_LABELS[setup.setup]} {setup.side}"
+
+                gate = DeskGate(
+                    bar_index=index,
+                    halted=self.halted,
+                    cooldown_until=self.cooldown_until,
+                    step=self.step,
+                    busy_symbols=set(self.positions) | set(self.orders),
+                    working_count=len(self.positions) + len(self.orders),
+                )
+                kill = self.filter.review(setup, gate)
+                if kill is not None:
+                    self.logger.counts.filter_killed += 1
+                    self.logger.kill("filter", kill)
+                    self.log("filter", "kill", f"{label} killed: {KILL_LABELS[kill].lower()}.", symbol)
+                    scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="killed"))
+                    continue
+
+                assessment = self.analyst.assess(setup)
+                self.logger.counts.analyst_scored += 1
+                verdict = self.analyst.verdict(assessment)
+                if verdict is not None:
+                    self.logger.counts.analyst_killed += 1
+                    self.logger.kill("analyst", verdict)
+                    self.log(
+                        "analyst",
+                        "kill",
+                        f"{label} scored {assessment.score} with EV {assessment.expected_r:+.2f}R: {KILL_LABELS[verdict].lower()}.",
+                        symbol,
+                    )
+                    scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="killed"))
+                    continue
+
+                equity = self.equity(marks)
+                sizing = self.risk.size(setup, assessment, equity, self.committed_notional())
+                if isinstance(sizing, str):
+                    self.logger.counts.risk_rejected += 1
+                    self.logger.kill("risk", sizing)
+                    self.log("risk", "reject", f"{label} rejected: {KILL_LABELS[sizing].lower()}.", symbol)
+                    scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="killed"))
+                    continue
+
+                self.logger.counts.risk_sized += 1
+                trade_id = f"T{self.next_trade_number:03d}"
+                self.next_trade_number += 1
+                self.orders[symbol] = PaperOrder(
+                    trade_id=trade_id, setup=setup, sizing=sizing, assessment=assessment, placed_step=self.step
+                )
+                capped_note = " Size capped by buying power." if sizing.capped else ""
+                self.log(
+                    "analyst",
+                    "score",
+                    f"{label}: {setup.thesis}. Score {assessment.score}, win rate {assessment.win_probability:.0%}, "
+                    f"R:R {setup.reward_risk:.1f}, EV {assessment.expected_r:+.2f}R.",
+                    symbol,
+                )
+                self.log(
+                    "risk",
+                    "size",
+                    f"Risking {sizing.risk_dollars:.2f} ({sizing.risk_fraction:.2%} of equity; full Kelly {sizing.kelly:.1%}) "
+                    f"on {sizing.quantity:g} units.{capped_note}",
+                    symbol,
+                )
+                self.log("executor", "order", f"Paper order queued for the next open ({trade_id}).", symbol)
+                scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="ordered"))
+        return scans
+
+    def frame(self, marks: dict[str, float], scans: list[DeskScanMark]) -> DeskFrame:
+        positions = [
+            DeskPosition(
+                trade_id=position.trade_id,
+                symbol=symbol,
+                side=position.side,
+                setup=position.order.setup.setup,
+                entry=round(position.entry, 4),
+                stop=round(position.stop, 4),
+                target=round(position.target, 4),
+                last=marks[symbol],
+                r_now=round(position.r_at(marks[symbol]), 2),
+                unrealized=round(position.gross_pnl_at(marks[symbol]), 2),
+            )
+            for symbol, position in self.positions.items()
+        ]
+        return DeskFrame(
+            step=self.step,
+            session=self.session,
+            clock=self.clock,
+            equity=round(self.equity(marks), 2),
+            positions=positions,
+            scans=scans,
+            pipeline=self.logger.counts.model_copy(),
+            halted=self.halted,
+        )
+
+    def build_response(self) -> DeskRunResponse:
+        summary = build_summary(
+            starting_balance=self.config.starting_balance,
+            ending_balance=self.config.starting_balance + self.realized,
+            trades=self.trades,
+            equity_curve=[frame.equity for frame in self.frames],
+            fees_paid=self.fees_paid,
+            sessions=self.config.sessions,
+            halted_sessions=self.halted_sessions,
+        )
+        setup_edges = []
+        for setup in SETUP_PRIORS:
+            prior_wins, prior_losses = self.analyst.prior_counts(setup)
+            journal_wins, journal_losses = self.analyst.journal_counts.get(setup, (0, 0))
+            live_wins, live_losses = self.analyst.live_counts[setup]
+            setup_trades = [trade for trade in self.trades if trade.setup == setup]
+            setup_edges.append(
+                DeskSetupEdge(
+                    setup=setup,
+                    enabled=setup in self.config.allowed_setups,
+                    prior_wins=round(prior_wins, 2),
+                    prior_losses=round(prior_losses, 2),
+                    journal_wins=journal_wins,
+                    journal_losses=journal_losses,
+                    live_wins=live_wins,
+                    live_losses=live_losses,
+                    posterior_win_rate=round(self.analyst.posterior(setup), 3),
+                    trades=len(setup_trades),
+                    avg_r=(
+                        round(sum(trade.r_multiple for trade in setup_trades) / len(setup_trades), 2)
+                        if setup_trades
+                        else None
+                    ),
+                )
+            )
+
+        # Audit, not a constant: a stop that ended looser than it started counts as widened.
+        pipeline = self.logger.counts.model_copy()
+        pipeline.stops_widened = sum(
+            1
+            for trade in self.trades
+            if (trade.stop_final - trade.stop_initial) * (1 if trade.side == "long" else -1) < 0
+        )
+
+        kill_reasons = sorted(
+            (
+                DeskKillReason(agent=agent, code=code, label=KILL_LABELS[code], count=count)
+                for (agent, code), count in self.logger.kills.items()
+            ),
+            key=lambda item: item.count,
+            reverse=True,
+        )
+
+        return DeskRunResponse(
+            id="pending",
+            created_at="",
+            config=self.config,
+            summary=summary,
+            bars_per_session=BARS_PER_SESSION,
+            pipeline=pipeline,
+            setup_edges=setup_edges,
+            kill_reasons=kill_reasons,
+            trades=self.trades,
+            frames=self.frames,
+            events=self.logger.events,
+            monte_carlo=run_monte_carlo(self.trade_returns, seed=self.config.seed or 0),
+        )
+
+
+def run_desk_session(
+    config: DeskConfig,
+    *,
+    watchlist_symbols: list[str],
+    journal_trades: list[TradeEntryResponse],
+) -> DeskRunResponse:
+    resolved, added = resolve_config(config, watchlist_symbols)
+    journal = journal_counts(journal_trades) if resolved.use_journal_priors else {}
+    session = DeskSession(resolved, journal)
+    if added:
+        session.log(
+            "logger",
+            "symbols",
+            f"Watchlist had fewer than {MIN_SYMBOLS} symbols, so the tape was topped up with {', '.join(added)}.",
+        )
+    return session.run()

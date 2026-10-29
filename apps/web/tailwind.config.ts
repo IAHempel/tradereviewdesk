@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import colors from "tailwindcss/colors";
 
 const config: Config = {
   content: [
@@ -13,8 +14,9 @@ const config: Config = {
       },
       colors: {
         ink: "#07111f",
-        cyan: "#67e8f9",
-        emerald: "#34d399",
+        // Keep the full scales so classes like `bg-cyan-300` still compile; the brand shade is the DEFAULT.
+        cyan: { ...colors.cyan, DEFAULT: "#67e8f9" },
+        emerald: { ...colors.emerald, DEFAULT: "#34d399" },
       },
       backgroundImage: {
         "grid-fade":
