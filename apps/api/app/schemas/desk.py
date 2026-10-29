@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversion"]
-DeskDataSource = Literal["synthetic", "polygon"]
+DeskDataSource = Literal["synthetic", "polygon", "alpaca"]
 DeskAgent = Literal["scout", "filter", "analyst", "risk", "executor", "logger"]
 DeskSide = Literal["long", "short"]
 DeskExitReason = Literal["stop", "trail", "target", "bell"]

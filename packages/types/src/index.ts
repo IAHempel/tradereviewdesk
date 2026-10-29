@@ -174,7 +174,7 @@ export interface ReportGenerationResult {
 export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
 export type DeskAgent = "scout" | "filter" | "analyst" | "risk" | "executor" | "logger";
 export type DeskSide = "long" | "short";
-export type DeskDataSource = "synthetic" | "polygon";
+export type DeskDataSource = "synthetic" | "polygon" | "alpaca";
 
 export interface DeskDataSourceInfo {
   id: DeskDataSource;

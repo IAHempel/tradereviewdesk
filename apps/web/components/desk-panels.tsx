@@ -26,6 +26,7 @@ import {
   formatSigned,
   formatSignedMoney,
   latestReplayableDay,
+  PROVIDER_NAMES,
 } from "@/lib/desk";
 
 const iconPaths: Record<DeskAgent, ReactNode> = {
@@ -501,8 +502,8 @@ export function RunHistory({
 
 function runTapeSummary(run: DeskRunSummary): string {
   const sessions = `${run.config.sessions} session${run.config.sessions === 1 ? "" : "s"}`;
-  if (run.data_source === "polygon") {
-    return `Polygon · ${sessions} to ${run.config.end_date ?? "?"}`;
+  if (run.data_source !== "synthetic") {
+    return `${PROVIDER_NAMES[run.data_source]} · ${sessions} to ${run.config.end_date ?? "?"}`;
   }
   return `Synthetic · ${sessions} · seed ${run.config.seed}`;
 }
@@ -559,7 +560,7 @@ export function DeskRulesForm({
     <div className="grid gap-5">
       <div>
         <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Market data</p>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <div className="mt-2 grid gap-3 sm:grid-cols-3">
           {sources.map((source) => {
             const selected = config.data_source === source.id;
             return (
@@ -572,7 +573,7 @@ export function DeskRulesForm({
                   onChange({
                     ...config,
                     data_source: source.id,
-                    end_date: source.id === "polygon" ? (config.end_date ?? latestDay) : null,
+                    end_date: source.id === "synthetic" ? null : (config.end_date ?? latestDay),
                   })
                 }
                 className={clsx(
@@ -586,7 +587,7 @@ export function DeskRulesForm({
             );
           })}
         </div>
-        {config.data_source === "polygon" ? (
+        {config.data_source !== "synthetic" ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_2fr] sm:items-end">
             <label className="grid gap-1 text-xs text-slate-400">
               Replay through (last session)
@@ -601,7 +602,7 @@ export function DeskRulesForm({
             <p className="text-xs text-slate-400">
               Replays the {config.sessions} trading day{config.sessions === 1 ? "" : "s"} up to this date, plus the day before
               as indicator warmup. Weekends and holidays are skipped.
-              {config.symbols.length > POLYGON_FREE_REQUESTS_PER_MINUTE
+              {config.data_source === "polygon" && config.symbols.length > POLYGON_FREE_REQUESTS_PER_MINUTE
                 ? ` Polygon's free plan loads ${POLYGON_FREE_REQUESTS_PER_MINUTE} symbols a minute; extra symbols may need a second run a minute later.`
                 : ""}
             </p>

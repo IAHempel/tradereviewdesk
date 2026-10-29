@@ -21,6 +21,7 @@ import { StatePanel } from "@/components/state-panels";
 import {
   DESK_AGENTS,
   FALLBACK_DESK_CONFIG,
+  PROVIDER_NAMES,
   TAPE_LABELS,
   deriveView,
   formatMoney,
@@ -188,7 +189,9 @@ export function DeskWorkspace({
   const sessionCount = run?.config.sessions ?? config.sessions;
   const statusLabel = !run ? "Idle" : playing ? "Live replay" : view?.isComplete ? "Session closed" : "Paused";
   const replayRange = run ? replayRangeLabel(run) : null;
-  const tapeLabel = run ? (replayRange ? `${TAPE_LABELS.polygon} · ${replayRange}` : TAPE_LABELS[run.data_source]) : TAPE_LABELS[config.data_source];
+  const tapeLabel = run
+    ? `${TAPE_LABELS[run.data_source]}${replayRange ? ` · ${replayRange}` : ""}`
+    : TAPE_LABELS[config.data_source];
 
   return (
     <div className="grid gap-4">
@@ -207,7 +210,10 @@ export function DeskWorkspace({
           <div>
             <h2 className="text-base font-semibold text-white">Desk rules</h2>
             <p className="mt-1 text-xs text-slate-400">
-              {config.data_source === "polygon" ? `Polygon bars through ${config.end_date ?? "yesterday"}` : "Synthetic tape"} ·{" "}
+              {config.data_source === "synthetic"
+                ? "Synthetic tape"
+                : `${PROVIDER_NAMES[config.data_source]} bars through ${config.end_date ?? "yesterday"}`}{" "}
+              ·{" "}
               {config.symbols.length ? config.symbols.join(" · ") : "Watchlist symbols"} · {config.risk_per_trade_pct}% risk ·{" "}
               {KELLY_LABELS[config.kelly_fraction] ?? config.kelly_fraction} Kelly · max {config.max_open_positions} open ·{" "}
               {config.max_daily_loss_pct}% daily stop · {config.sessions} session{config.sessions === 1 ? "" : "s"}

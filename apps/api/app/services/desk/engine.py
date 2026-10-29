@@ -40,7 +40,7 @@ from app.services.desk.agents import (
     map_journal_tags,
 )
 from app.services.desk.calendar import market_today
-from app.services.desk.historical import load_polygon_feed
+from app.services.desk.historical import PROVIDERS, load_historical_feed
 from app.services.desk.market import Bar, MarketFeed, SimulatedMarketFeed, bar_clock
 from app.services.desk.stats import build_summary, run_monte_carlo
 
@@ -148,7 +148,7 @@ class DeskSession:
         tape = (
             "a synthetic tape"
             if self.feed.data_source == "synthetic"
-            else f"Polygon 5-minute bars, {labels[0]} to {labels[-1]}"
+            else f"{PROVIDERS[self.feed.data_source].name} 5-minute bars, {labels[0]} to {labels[-1]}"
         )
         self.log(
             "logger",
@@ -510,9 +510,11 @@ def run_desk_session(
     resolved, added = resolve_config(config, watchlist_symbols)
     notes: list[str] = []
     feed: MarketFeed
-    if resolved.data_source == "polygon":
+    if resolved.data_source in PROVIDERS:
         assert resolved.end_date is not None
-        feed, notes = load_polygon_feed(resolved.symbols, resolved.end_date, resolved.sessions, client=market_client)
+        feed, notes = load_historical_feed(
+            resolved.data_source, resolved.symbols, resolved.end_date, resolved.sessions, client=market_client
+        )
         resolved = resolved.model_copy(update={"symbols": feed.symbols})
     else:
         feed = SimulatedMarketFeed(resolved.symbols, resolved.seed or 0, resolved.sessions)

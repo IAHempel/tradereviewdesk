@@ -195,11 +195,12 @@ API: `GET /api/v1/desk/defaults`, `POST /api/v1/desk/runs`, `GET /api/v1/desk/ru
 
 API also exposes `GET /api/v1/desk/sources`, which reports whether historical data is available.
 
-### Historical replays (Polygon)
+### Historical replays (Alpaca or Polygon)
 
-Set `POLYGON_API_KEY` on the API (the free plan works), then choose **Polygon historical** under Desk rules → Market data and pick the last session to replay.
+Set `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` (recommended) or `POLYGON_API_KEY` on the API; free plans work for both. Then choose the provider under Desk rules → Market data and pick the last session to replay.
 
-- Bars come from Polygon's `/v2/aggs` 5-minute aggregates, split-adjusted, with the key sent as a bearer header.
+- Alpaca bars come from `/v2/stocks/bars` (5-minute, split-adjusted, consolidated SIP feed for completed days). One request covers every symbol, and the free plan allows 200 requests a minute.
+- Polygon bars come from `/v2/aggs` 5-minute aggregates, split-adjusted, with the key sent as a bearer header. Polygon now operates as Massive; set `POLYGON_BASE_URL` if its API host changes.
 - Only NYSE regular hours are replayed (09:30–16:00 ET). Holidays drop out because they have no bars, and the scheduled 1:00 pm early closes (July 3, the day after Thanksgiving, December 24) replay as shorter sessions.
 - One extra trading day before the first session is loaded as indicator warmup and never traded.
 - A 5-minute slot with no trades becomes a flat, zero-volume bar at the last close. Symbols with fewer than half their slots traded on any replayed day are dropped, and the Logger says so.
@@ -217,7 +218,7 @@ The agents only see `Bar` objects through the `MarketFeed` protocol in `market.p
 - SQLAlchemy models aligned to the startup brief schema
 - Pydantic and Zod schemas for report payloads
 - job-based report pipeline, CSV import validation, and Stripe-ready billing scaffolding
-- paper Agent Desk with a synthetic tape or Polygon historical bars, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
+- paper Agent Desk with a synthetic tape or Alpaca/Polygon historical bars, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
 
 ## Next implementation steps
 

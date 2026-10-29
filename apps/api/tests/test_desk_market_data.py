@@ -1,13 +1,10 @@
-import math
-import random
 import sys
 import tempfile
 import time
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 import httpx
 from fastapi.testclient import TestClient
@@ -21,82 +18,22 @@ from app.core.config import settings
 from app.main import create_application
 from app.schemas.desk import DeskConfig
 from app.services import state_store
-from app.services.desk import historical
-from app.services.desk.calendar import MARKET_TIMEZONE, is_early_close, session_bar_count
+from app.services.desk import alpaca, historical
+from app.services.desk.calendar import is_early_close, session_bar_count
 from app.services.desk.engine import run_desk_session
-from app.services.desk.historical import align_session, load_polygon_feed
+from app.services.desk.historical import align_session, load_historical_feed
 from app.services.desk.market import MarketDataError
-from app.services.desk.polygon import SlotBar, fetch_session_bars
-
-# Thanksgiving week 2025: Thursday Nov 27 is a holiday and Friday Nov 28 closes at 1:00 pm.
-END_DATE = date(2025, 11, 28)
-HOLIDAYS = {date(2025, 11, 27)}
-
-
-def polygon_rows(symbol: str, start: date, end: date, *, coverage: float = 1.0) -> list[dict]:
-    """Aggregate rows shaped like Polygon's /v2/aggs response, extended hours included."""
-    rng = random.Random(symbol)
-    price = 100 + rng.random() * 300
-    rows = []
-    day = start
-    while day <= end:
-        if day.weekday() < 5 and day not in HOLIDAYS:
-            for minute in range(4 * 60, 20 * 60, 5):
-                if rng.random() > coverage:
-                    continue
-                stamp = datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=MARKET_TIMEZONE)
-                open_ = price
-                price *= math.exp(rng.gauss(0, 0.002))
-                rows.append(
-                    {
-                        "t": int(stamp.timestamp() * 1000),
-                        "o": round(open_, 2),
-                        "h": round(max(open_, price) * 1.001, 2),
-                        "l": round(min(open_, price) * 0.999, 2),
-                        "c": round(price, 2),
-                        "v": rng.randint(1_000, 90_000),
-                        "vw": round(price, 2),
-                        "n": rng.randint(10, 500),
-                    }
-                )
-        day += timedelta(days=1)
-    return rows
-
-
-class FakePolygon:
-    """Serves aggregate requests from generated rows and records what was asked."""
-
-    def __init__(self, *, coverage: dict[str, float] | None = None, page_size: int | None = None) -> None:
-        self.coverage = coverage or {}
-        self.page_size = page_size
-        self.requests: list[httpx.Request] = []
-        self.status_override: tuple[int, dict] | None = None
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        if self.status_override:
-            status, body = self.status_override
-            return httpx.Response(status, json=body)
-
-        parts = urlparse(str(request.url)).path.split("/")
-        symbol, start, end = parts[4], date.fromisoformat(parts[8]), date.fromisoformat(parts[9])
-        rows = polygon_rows(symbol, start, end, coverage=self.coverage.get(symbol, 1.0))
-        offset = int(request.url.params.get("cursor", 0))
-        page = rows[offset : offset + self.page_size] if self.page_size else rows
-        body = {"ticker": symbol, "status": "OK", "resultsCount": len(page), "results": page}
-        if self.page_size and offset + self.page_size < len(rows):
-            body["next_url"] = f"{str(request.url).split('?')[0]}?cursor={offset + self.page_size}"
-        return httpx.Response(200, json=body)
-
-    def client(self) -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(self.handler))
-
+from app.services.desk.polygon import fetch_session_bars
+from app.services.desk.slots import SlotBar
+from market_fakes import END_DATE, FakeAlpaca, FakePolygon
 
 class MarketDataTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.patches = [
             patch.object(settings, "polygon_api_key", "test-polygon-key"),
+            patch.object(settings, "alpaca_api_key_id", "test-alpaca-id"),
+            patch.object(settings, "alpaca_api_secret_key", "test-alpaca-secret"),
             patch.object(settings, "market_data_cache_dir", self.temp_dir.name),
         ]
         for active_patch in self.patches:
@@ -164,6 +101,75 @@ class PolygonClientTests(MarketDataTestCase):
                 self.assertIn(expected_text, caught.exception.message)
 
 
+class AlpacaClientTests(MarketDataTestCase):
+    def test_one_request_covers_many_symbols_in_regular_hours(self) -> None:
+        fake = FakeAlpaca()
+        with fake.client() as client:
+            bars = alpaca.fetch_bars(["NVDA", "AAPL"], date(2025, 11, 24), END_DATE, client=client)
+
+        self.assertEqual(len(fake.requests), 1)
+        request = fake.requests[0]
+        self.assertEqual(request.url.path, "/v2/stocks/bars")
+        self.assertEqual(request.headers["APCA-API-KEY-ID"], "test-alpaca-id")
+        self.assertEqual(request.headers["APCA-API-SECRET-KEY"], "test-alpaca-secret")
+        params = request.url.params
+        self.assertEqual(params["symbols"], "NVDA,AAPL")
+        self.assertEqual(params["timeframe"], "5Min")
+        self.assertEqual(params["feed"], "sip")
+        self.assertEqual(params["adjustment"], "split")
+        self.assertEqual(params["start"], "2025-11-24T05:00:00Z")
+        self.assertEqual(params["end"], "2025-11-29T01:00:00Z")
+
+        for symbol in ("AAPL", "NVDA"):
+            per_day: dict[date, int] = {}
+            for bar in bars[symbol]:
+                per_day[bar.day] = per_day.get(bar.day, 0) + 1
+            self.assertEqual(per_day, {date(2025, 11, 24): 78, date(2025, 11, 25): 78, date(2025, 11, 26): 78, END_DATE: 42})
+
+    def test_follows_page_tokens(self) -> None:
+        fake = FakeAlpaca(page_size=300)
+        with fake.client() as client:
+            bars = alpaca.fetch_bars(["AAPL", "NVDA"], date(2025, 11, 24), END_DATE, client=client)
+        self.assertGreater(len(fake.requests), 2)
+        self.assertEqual([len(bars["AAPL"]), len(bars["NVDA"])], [78 * 3 + 42, 78 * 3 + 42])
+
+    def test_errors_map_to_clear_statuses(self) -> None:
+        cases = [
+            (429, {"message": "too many requests"}, 429, "rate limit"),
+            (403, {"message": "forbidden."}, 502, "ALPACA_API_KEY_ID"),
+            (422, {"message": "invalid start"}, 502, "invalid start"),
+        ]
+        for status, body, expected_status, expected_text in cases:
+            fake = FakeAlpaca()
+            fake.status_override = (status, body)
+            with self.subTest(status=status), fake.client() as client:
+                with self.assertRaises(MarketDataError) as caught:
+                    alpaca.fetch_bars(["AAPL"], date(2025, 11, 24), END_DATE, client=client)
+                self.assertEqual(caught.exception.status_code, expected_status)
+                self.assertIn(expected_text, caught.exception.message)
+
+    def test_historical_run_batches_and_caches(self) -> None:
+        fake = FakeAlpaca(coverage={"ILLQ": 0.2})
+        config = DeskConfig(data_source="alpaca", end_date=END_DATE, sessions=2, symbols=["AAPL", "NVDA", "ILLQ"], seed=2)
+        with fake.client() as client:
+            first = run_desk_session(config, watchlist_symbols=[], journal_trades=[], market_client=client)
+            second = run_desk_session(config, watchlist_symbols=[], journal_trades=[], market_client=client)
+
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(first.data_source, "alpaca")
+        self.assertEqual(first.session_labels, ["2025-11-26", "2025-11-28"])
+        self.assertEqual(first.config.symbols, ["AAPL", "NVDA"])
+        plan = next(event for event in first.events if event.kind == "session_plan")
+        self.assertIn("Alpaca 5-minute bars", plan.message)
+        self.assertEqual(first.model_dump_json(), second.model_dump_json())
+
+    def test_requires_both_keys(self) -> None:
+        with patch.object(settings, "alpaca_api_secret_key", "replace-me"), self.assertRaises(MarketDataError) as caught:
+            load_historical_feed("alpaca", ["AAPL"], END_DATE, 1)
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertIn("ALPACA_API_SECRET_KEY", caught.exception.message)
+
+
 class AlignmentTests(unittest.TestCase):
     def test_gaps_become_flat_bars_and_thin_days_are_rejected(self) -> None:
         day = date(2025, 11, 26)
@@ -206,7 +212,7 @@ class HistoricalFeedTests(MarketDataTestCase):
         config = DeskConfig(data_source="polygon", end_date=END_DATE, sessions=3, symbols=["AAPL", "NVDA", "SPY", "QQQ"], seed=4)
         with fake.client() as client:
             result = run_desk_session(config, watchlist_symbols=[], journal_trades=[], market_client=client)
-            feed, _ = load_polygon_feed(config.symbols, END_DATE, 3, client=client)
+            feed, _ = load_historical_feed("polygon", config.symbols, END_DATE, 3, client=client)
 
         first_step = {}
         for frame in result.frames:
@@ -233,34 +239,34 @@ class HistoricalFeedTests(MarketDataTestCase):
     def test_unknown_tickers_are_dropped_with_a_reason(self) -> None:
         fake = FakePolygon(coverage={"ZZZZ": 0.0})
         with fake.client() as client:
-            feed, notes = load_polygon_feed(["AAPL", "ZZZZ"], END_DATE, 1, client=client)
+            feed, notes = load_historical_feed("polygon", ["AAPL", "ZZZZ"], END_DATE, 1, client=client)
         self.assertEqual(feed.symbols, ["AAPL"])
         self.assertIn("check the ticker", notes[0])
 
     def test_rate_limit_keeps_what_was_loaded(self) -> None:
         fake = FakePolygon()
         with fake.client() as client:
-            load_polygon_feed(["AAPL"], END_DATE, 2, client=client)
+            load_historical_feed("polygon", ["AAPL"], END_DATE, 2, client=client)
             fake.status_override = (429, {"status": "ERROR"})
             with self.assertRaises(MarketDataError) as caught:
-                load_polygon_feed(["AAPL", "NVDA"], END_DATE, 2, client=client)
+                load_historical_feed("polygon", ["AAPL", "NVDA"], END_DATE, 2, client=client)
         self.assertEqual(caught.exception.status_code, 429)
         self.assertEqual([request.url.path.split("/")[4] for request in fake.requests], ["AAPL", "NVDA"])
 
     def test_rejects_unconfigured_and_unfinished_days(self) -> None:
         with patch.object(settings, "polygon_api_key", "replace-me"), self.assertRaises(MarketDataError) as caught:
-            load_polygon_feed(["AAPL"], END_DATE, 1)
+            load_historical_feed("polygon", ["AAPL"], END_DATE, 1)
         self.assertEqual(caught.exception.status_code, 503)
 
         with patch.object(historical, "market_today", return_value=END_DATE), self.assertRaises(MarketDataError) as caught:
-            load_polygon_feed(["AAPL"], END_DATE, 1)
+            load_historical_feed("polygon", ["AAPL"], END_DATE, 1)
         self.assertEqual(caught.exception.status_code, 422)
 
     def test_not_enough_trading_days(self) -> None:
         fake = FakePolygon()
         with fake.client() as client, patch.object(historical, "history_window", return_value=date(2025, 11, 26)):
             with self.assertRaises(MarketDataError) as caught:
-                load_polygon_feed(["AAPL"], END_DATE, 3, client=client)
+                load_historical_feed("polygon", ["AAPL"], END_DATE, 3, client=client)
         self.assertEqual(caught.exception.status_code, 422)
         self.assertIn("needs 4", caught.exception.message)
 
@@ -312,7 +318,9 @@ class MarketDataApiTests(MarketDataTestCase):
 
     def test_sources_report_availability(self) -> None:
         sources = {item["id"]: item for item in self.client.get("/api/v1/desk/sources", headers=self.headers()).json()}
+        self.assertEqual(list(sources), ["synthetic", "polygon", "alpaca"])
         self.assertTrue(sources["polygon"]["available"])
+        self.assertTrue(sources["alpaca"]["available"])
         with patch.object(settings, "polygon_api_key", "replace-me"):
             sources = {item["id"]: item for item in self.client.get("/api/v1/desk/sources", headers=self.headers()).json()}
         self.assertFalse(sources["polygon"]["available"])

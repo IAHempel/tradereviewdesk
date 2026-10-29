@@ -1,30 +1,16 @@
 """Polygon.io 5-minute aggregates, trimmed to NYSE regular-session hours."""
 
-from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from urllib.parse import quote
 
 import httpx
 
 from app.core.config import settings
-from app.services.desk.calendar import MARKET_TIMEZONE, session_bar_count
-from app.services.desk.market import BAR_MINUTES, SESSION_OPEN_MINUTES, MarketDataError
+from app.services.desk.market import BAR_MINUTES, MarketDataError
+from app.services.desk.slots import SlotBar, to_slot_bar
 
 AGGREGATE_LIMIT = 50_000
 MAX_PAGES = 10
-
-
-@dataclass(frozen=True)
-class SlotBar:
-    """One regular-session bar: `slot` 0 is the 09:30 bar."""
-
-    day: date
-    slot: int
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
 
 
 def _error_detail(response: httpx.Response) -> str:
@@ -33,22 +19,6 @@ def _error_detail(response: httpx.Response) -> str:
     except ValueError:
         return response.text[:200]
     return str(payload.get("error") or payload.get("message") or payload.get("status") or "")[:200]
-
-
-def _to_slot_bar(row: dict) -> SlotBar | None:
-    stamp = datetime.fromtimestamp(row["t"] / 1000, tz=MARKET_TIMEZONE)
-    slot, remainder = divmod(stamp.hour * 60 + stamp.minute - SESSION_OPEN_MINUTES, BAR_MINUTES)
-    if remainder or slot < 0 or slot >= session_bar_count(stamp.date()):
-        return None
-    return SlotBar(
-        day=stamp.date(),
-        slot=slot,
-        open=float(row["o"]),
-        high=float(row["h"]),
-        low=float(row["l"]),
-        close=float(row["c"]),
-        volume=float(row.get("v") or 0),
-    )
 
 
 def fetch_session_bars(symbol: str, start: date, end: date, *, client: httpx.Client) -> list[SlotBar]:
@@ -92,7 +62,8 @@ def fetch_session_bars(symbol: str, start: date, end: date, *, client: httpx.Cli
             raise MarketDataError(f"Polygon could not serve {symbol}: {_error_detail(response)}.")
 
         for row in payload.get("results") or []:
-            bar = _to_slot_bar(row)
+            stamp = datetime.fromtimestamp(row["t"] / 1000, tz=UTC)
+            bar = to_slot_bar(stamp, row["o"], row["h"], row["l"], row["c"], row.get("v"))
             if bar is not None:
                 bars.append(bar)
 
@@ -101,3 +72,8 @@ def fetch_session_bars(symbol: str, start: date, end: date, *, client: httpx.Cli
         params = None
 
     return bars
+
+
+def fetch_bars(symbols: list[str], start: date, end: date, *, client: httpx.Client) -> dict[str, list[SlotBar]]:
+    """Polygon serves one ticker per request, so callers batch one symbol at a time."""
+    return {symbol: fetch_session_bars(symbol, start, end, client=client) for symbol in symbols}

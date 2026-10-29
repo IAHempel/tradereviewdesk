@@ -272,9 +272,16 @@ export function formatRunLabel(createdAt: string): string {
   return `${runTimeFormat.format(date)} ET`;
 }
 
+export const PROVIDER_NAMES: Record<DeskDataSource, string> = {
+  synthetic: "Synthetic",
+  polygon: "Polygon",
+  alpaca: "Alpaca",
+};
+
 export const TAPE_LABELS: Record<DeskDataSource, string> = {
   synthetic: "synthetic tape",
   polygon: "Polygon 5-min bars",
+  alpaca: "Alpaca 5-min bars",
 };
 
 function parseDay(isoDay: string): Date | null {
@@ -285,19 +292,19 @@ function parseDay(isoDay: string): Date | null {
 /** "Tue, Nov 25" for a replayed trading day; "Session 2" on the synthetic tape. */
 export function sessionLabel(run: Pick<DeskRun, "data_source" | "session_labels">, session: number): string {
   const label = run.session_labels?.[session - 1];
-  const day = run.data_source === "polygon" && label ? parseDay(label) : null;
+  const day = run.data_source !== "synthetic" && label ? parseDay(label) : null;
   return day ? sessionDayFormat.format(day) : `Session ${session}`;
 }
 
 /** Compact marker for chart session dividers: "Nov 25" or "S2". */
 export function shortSessionLabel(run: Pick<DeskRun, "data_source" | "session_labels">, session: number): string {
   const label = run.session_labels?.[session - 1];
-  const day = run.data_source === "polygon" && label ? parseDay(label) : null;
+  const day = run.data_source !== "synthetic" && label ? parseDay(label) : null;
   return day ? shortDayFormat.format(day) : `S${session}`;
 }
 
 export function replayRangeLabel(run: Pick<DeskRun, "data_source" | "session_labels">): string | null {
-  if (run.data_source !== "polygon" || !run.session_labels?.length) {
+  if (run.data_source === "synthetic" || !run.session_labels?.length) {
     return null;
   }
   const first = parseDay(run.session_labels[0]);

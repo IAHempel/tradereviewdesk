@@ -61,6 +61,8 @@ Set these environment variables in Railway:
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `30` | Recommended | Can remain `30` to start. |
 | `POLYGON_API_KEY` | `your-polygon-key` | Optional | Enables Agent Desk replays of real historical 5-minute bars. Without it the desk offers only the synthetic tape. |
 | `POLYGON_BASE_URL` | `https://api.polygon.io` | Optional | Override only if Polygon changes its API host. |
+| `ALPACA_API_KEY_ID` | `PK...` | Optional | With the secret below, enables Agent Desk replays of real consolidated 5-minute bars (and, later, live paper mode). |
+| `ALPACA_API_SECRET_KEY` | `...` | Optional | Alpaca secret for the key above. |
 | `MARKET_DATA_CACHE_DIR` | `/data/market_cache` | Optional | Where fetched bars are cached. Defaults to `apps/api/data/market_cache`; point it at a persistent volume to keep the cache across deploys. |
 | `STRIPE_SECRET_KEY` | `sk_live_...` | Yes for live billing | Required for checkout, portal, and webhooks. |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | Yes for live billing | Must match the live Stripe webhook endpoint. |
@@ -127,6 +129,17 @@ Copy into Railway:
 | `LLM_API_KEY` | your live OpenAI API key |
 | `LLM_MODEL_NAME` | `gpt-4.1-mini` |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `30` |
+
+## Alpaca (optional, recommended)
+
+Copy into Railway to let the Agent Desk replay real historical bars from Alpaca:
+
+| Variable | Recommended value |
+| --- | --- |
+| `ALPACA_API_KEY_ID` | your Alpaca API key ID (a free account works) |
+| `ALPACA_API_SECRET_KEY` | your Alpaca secret key |
+
+One request loads every symbol in a run, and the free plan allows 200 requests a minute. Completed days use the consolidated SIP feed, which the free plan serves once data is more than 15 minutes old.
 
 ## Polygon (optional)
 

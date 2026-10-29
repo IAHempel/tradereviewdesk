@@ -61,6 +61,16 @@ def list_desk_sources(current_user: CurrentUser = Depends(require_current_user))
                 else "Set POLYGON_API_KEY on the API to replay real historical bars."
             ),
         ),
+        DeskDataSourceInfo(
+            id="alpaca",
+            label="Alpaca historical",
+            available=settings.is_alpaca_configured,
+            detail=(
+                "Real 5-minute consolidated bars for completed sessions, cached after the first load."
+                if settings.is_alpaca_configured
+                else "Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY on the API to replay real historical bars."
+            ),
+        ),
     ]
 
 

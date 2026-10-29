@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     polygon_api_key: str = "replace-me"
     polygon_base_url: str = "https://api.polygon.io"
     polygon_request_timeout_seconds: float = 20.0
+    alpaca_api_key_id: str = "replace-me"
+    alpaca_api_secret_key: str = "replace-me"
+    alpaca_data_base_url: str = "https://data.alpaca.markets"
+    alpaca_historical_feed: str = "sip"
+    alpaca_live_feed: str = "iex"
+    alpaca_request_timeout_seconds: float = 20.0
     market_data_cache_dir: str = ""
     stripe_secret_key: str = "sk_test_placeholder"
     stripe_webhook_secret: str = "whsec_placeholder"
@@ -89,6 +95,11 @@ class Settings(BaseSettings):
     @property
     def is_polygon_configured(self) -> bool:
         return bool(self.polygon_api_key) and self.polygon_api_key != "replace-me"
+
+    @property
+    def is_alpaca_configured(self) -> bool:
+        placeholders = ("", "replace-me")
+        return self.alpaca_api_key_id not in placeholders and self.alpaca_api_secret_key not in placeholders
 
     @property
     def market_data_cache_path(self) -> Path:
