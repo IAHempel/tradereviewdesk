@@ -1,6 +1,17 @@
 from fastapi import APIRouter
 
-from app.api.routes import billing, checklist_runs, checklist_templates, desk, health, profile, reports, trades, watchlists
+from app.api.routes import (
+    billing,
+    binary,
+    checklist_runs,
+    checklist_templates,
+    desk,
+    health,
+    profile,
+    reports,
+    trades,
+    watchlists,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -15,4 +26,5 @@ api_router.include_router(checklist_runs.router, prefix="/checklist-runs", tags=
 api_router.include_router(trades.router, prefix="/trades", tags=["trades"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(desk.router, prefix="/desk", tags=["desk"])
+api_router.include_router(binary.router, prefix="/binary", tags=["binary"])
 api_router.include_router(billing.router, prefix="/billing", tags=["billing"])

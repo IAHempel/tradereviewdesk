@@ -5,6 +5,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from app.core.auth import LOCAL_DEMO_AUTH_PROVIDER_ID
+from app.schemas.binary import BinaryRunResponse
 from app.schemas.checklists import ChecklistRunResponse, ChecklistTemplateResponse
 from app.schemas.desk import DESK_LIVE_ACTIVE_STATUSES, DeskLiveSessionRecord, DeskRunResponse
 from app.schemas.profile import ProfileResponse, ProfileUpdate
@@ -203,6 +204,23 @@ def save_desk_runs(items: list[DeskRunResponse], current_user: "CurrentUser | No
     def mutator(state: dict[str, Any]) -> list[DeskRunResponse]:
         scoped_state = _get_scoped_state(state, current_user)
         scoped_state["desk_runs"] = [item.model_dump(mode="json") for item in items]
+        return items
+
+    return _with_state(mutator)
+
+
+def list_binary_runs(current_user: "CurrentUser | None" = None) -> list[BinaryRunResponse]:
+    return _read(
+        lambda state: [
+            BinaryRunResponse.model_validate(item) for item in _get_scoped_state(state, current_user).get("binary_runs", [])
+        ]
+    )
+
+
+def save_binary_runs(items: list[BinaryRunResponse], current_user: "CurrentUser | None" = None) -> list[BinaryRunResponse]:
+    def mutator(state: dict[str, Any]) -> list[BinaryRunResponse]:
+        scoped_state = _get_scoped_state(state, current_user)
+        scoped_state["binary_runs"] = [item.model_dump(mode="json") for item in items]
         return items
 
     return _with_state(mutator)

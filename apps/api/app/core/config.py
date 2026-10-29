@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     alpaca_flow_feed: str = "iex"
     alpaca_request_timeout_seconds: float = 20.0
     market_data_cache_dir: str = ""
+    coinbase_base_url: str = "https://api.exchange.coinbase.com"
+    coinbase_request_timeout_seconds: float = 15.0
     desk_notify_extra_hosts: str = ""
     desk_live_stale_seconds: int = 90
     stripe_secret_key: str = "sk_test_placeholder"

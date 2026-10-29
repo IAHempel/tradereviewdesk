@@ -31,3 +31,14 @@ class DeskLiveSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
     record: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class BinaryRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "binary_runs"
+    __table_args__ = (Index("idx_binary_runs_user_id_created_at", "user_id", "created_at"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    data_source: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False)
