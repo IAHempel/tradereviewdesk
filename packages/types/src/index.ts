@@ -172,7 +172,7 @@ export interface ReportGenerationResult {
 }
 
 export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
-export type DeskAgent = "scout" | "filter" | "analyst" | "risk" | "executor" | "logger";
+export type DeskAgent = "scout" | "flow" | "filter" | "analyst" | "risk" | "executor" | "logger";
 export type DeskSide = "long" | "short";
 export type DeskDataSource = "synthetic" | "polygon" | "alpaca";
 
@@ -202,6 +202,8 @@ export interface DeskConfig {
   sessions: number;
   allowed_setups: DeskSetup[];
   use_journal_priors: boolean;
+  use_trade_flow: boolean;
+  flow_veto: number;
   seed: number | null;
 }
 
@@ -218,6 +220,7 @@ export interface DeskPipelineCounts {
   stops_trailed: number;
   stops_widened: number;
   logger_reasons: number;
+  flow_vetoes: number;
 }
 
 export interface DeskPosition {
@@ -249,6 +252,7 @@ export interface DeskFrame {
   scans: DeskScanMark[];
   pipeline: DeskPipelineCounts;
   halted: boolean;
+  flow: Record<string, number>;
 }
 
 export interface DeskEvent {
@@ -368,4 +372,5 @@ export interface DeskRun extends DeskRunSummary {
   events: DeskEvent[];
   monte_carlo: DeskMonteCarlo | null;
   disclaimer: string;
+  flow_source: string;
 }

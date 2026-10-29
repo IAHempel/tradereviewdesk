@@ -10,9 +10,10 @@ from datetime import UTC, date, datetime, time, timedelta
 import httpx
 
 from app.core.config import settings
-from app.services.desk.calendar import MARKET_TIMEZONE
-from app.services.desk.market import MarketDataError
-from app.services.desk.slots import SlotBar, to_slot_bar
+from app.services.desk.calendar import MARKET_TIMEZONE, session_bar_count
+from app.services.desk.flow import FlowSlot, TickRuleClassifier
+from app.services.desk.market import BAR_MINUTES, SESSION_OPEN_MINUTES, MarketDataError
+from app.services.desk.slots import SlotBar, slot_for, to_slot_bar
 
 PAGE_LIMIT = 10_000
 MAX_PAGES = 50
@@ -104,6 +105,65 @@ def fetch_bars(
         params = {**params, "page_token": token}
 
     return bars
+
+
+def fetch_trade_flow(
+    symbols: list[str],
+    day: date,
+    *,
+    client: httpx.Client,
+    end_at: datetime | None = None,
+) -> dict[str, list[FlowSlot]]:
+    """Buy and sell volume per 5-minute slot from trade prints, each classified by the tick rule.
+
+    Uses the IEX feed by default: one venue's prints, a sample of the whole tape's flow,
+    but free and small enough to page through for a few symbols and days.
+    """
+    slot_count = session_bar_count(day)
+    close_minutes = SESSION_OPEN_MINUTES + slot_count * BAR_MINUTES
+    params: dict[str, str | int] = {
+        "symbols": ",".join(symbols),
+        "start": _rfc3339(day, time(9, 30)),
+        "end": (
+            end_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if end_at
+            else _rfc3339(day, time(close_minutes // 60, close_minutes % 60))
+        ),
+        "feed": settings.alpaca_flow_feed,
+        "sort": "asc",
+        "limit": PAGE_LIMIT,
+    }
+    buys = {symbol: [0.0] * slot_count for symbol in symbols}
+    sells = {symbol: [0.0] * slot_count for symbol in symbols}
+    classifiers = {symbol: TickRuleClassifier() for symbol in symbols}
+
+    for _ in range(MAX_PAGES):
+        payload = get_page("/v2/stocks/trades", params, client=client, what=f"trade prints for {', '.join(symbols)}")
+        for symbol, rows in (payload.get("trades") or {}).items():
+            if symbol not in classifiers:
+                continue
+            for row in rows or []:
+                # Minute precision is all a slot needs, and it sidesteps nanosecond timestamps.
+                located = slot_for(datetime.strptime(row["t"][:16], "%Y-%m-%dT%H:%M").replace(tzinfo=UTC))
+                if located is None or located[0] != day:
+                    continue
+                side = classifiers[symbol].side(float(row["p"]))
+                size = float(row.get("s") or 0)
+                if side > 0:
+                    buys[symbol][located[1]] += size
+                elif side < 0:
+                    sells[symbol][located[1]] += size
+                else:
+                    buys[symbol][located[1]] += size / 2
+                    sells[symbol][located[1]] += size / 2
+        token = payload.get("next_page_token")
+        if not token:
+            break
+        params = {**params, "page_token": token}
+
+    return {
+        symbol: [FlowSlot(buy, sell) for buy, sell in zip(buys[symbol], sells[symbol], strict=True)] for symbol in symbols
+    }
 
 
 def completed_bar_cutoff(now: datetime) -> datetime:

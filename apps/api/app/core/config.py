@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     alpaca_data_base_url: str = "https://data.alpaca.markets"
     alpaca_historical_feed: str = "sip"
     alpaca_live_feed: str = "iex"
+    alpaca_flow_feed: str = "iex"
     alpaca_request_timeout_seconds: float = 20.0
     market_data_cache_dir: str = ""
     stripe_secret_key: str = "sk_test_placeholder"

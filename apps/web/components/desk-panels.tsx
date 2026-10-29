@@ -36,6 +36,7 @@ const iconPaths: Record<DeskAgent, ReactNode> = {
       <path d="m20 20-4.5-4.5" />
     </>
   ),
+  flow: <path d="M3 8h11l-3-3M21 16H10l3 3" />,
   filter: <path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5Z" />,
   analyst: <path d="M5 19V11M10 19V6M15 19v-5M20 19V9" />,
   risk: <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />,
@@ -100,7 +101,7 @@ export function PipelineStrip({ frame, events, active }: { frame: DeskFrame | nu
             <span className="block h-full w-10 rounded-full bg-cyan-300/80 blur-[1px] motion-safe:animate-[desk-flow_1.6s_linear_infinite]" />
           </div>
         ) : null}
-        <ol className="relative grid grid-cols-3 gap-y-4 sm:grid-cols-6">
+        <ol className="relative grid grid-cols-4 gap-y-4 sm:grid-cols-7">
           {DESK_AGENTS.map((agent) => (
             <li key={agent.id} className="flex flex-col items-center text-center" title={agent.role}>
               <div className="flex h-5 items-end gap-1">
@@ -715,6 +716,30 @@ export function DeskRulesForm({
           />
           Seed the Analyst&apos;s win-rate estimates with my tagged journal trades
         </label>
+      </div>
+
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Order flow</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_3fr] sm:items-end">
+          <NumberField
+            label="Flow veto (imbalance)"
+            value={config.flow_veto}
+            onChange={(v) => set("flow_veto", v)}
+            step={0.05}
+            min={0.05}
+            max={1}
+            hint="Breakouts and trend pullbacks are killed when buy/sell imbalance runs this far against them. 1 turns the veto off."
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="accent-cyan-300"
+              checked={config.use_trade_flow}
+              onChange={(event) => set("use_trade_flow", event.target.checked)}
+            />
+            On Alpaca, read real IEX trade prints for flow (slower first load). Other tapes use a bar-based proxy.
+          </label>
+        </div>
       </div>
     </div>
   );

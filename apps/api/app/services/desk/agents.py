@@ -26,6 +26,8 @@ ATR_PERIOD = 14
 OPENING_NOISE_BARS = 2
 CLOSING_BELL_BARS = 6
 TILT_COOLDOWN_BARS = 12
+# Continuation setups need buyers (or sellers) behind them; reversal setups trade against flow by design.
+FLOW_CONFIRMED_SETUPS = ("breakout", "trend_pullback")
 
 # Starting assumptions for each setup's win rate and how many pseudo-trades of
 # weight they carry. The Analyst updates them with journal and live outcomes.
@@ -64,6 +66,7 @@ KILL_LABELS: dict[str, str] = {
     "negative_ev": "Non-positive expected value",
     "kelly": "Kelly says no edge",
     "buying_power": "No buying power left",
+    "flow_against": "Order flow against the trade",
     "gap_stop": "Gapped through stop",
     "gap_target": "Gapped past target",
 }
@@ -132,6 +135,10 @@ class Setup:
     @property
     def stop_atr(self) -> float:
         return self.risk_per_unit / self.atr
+
+    @property
+    def direction(self) -> int:
+        return 1 if self.side == "long" else -1
 
 
 class ScoutAgent:
@@ -244,6 +251,7 @@ class DeskGate:
     step: int
     busy_symbols: set[str]
     working_count: int
+    flow: float = 0.0
 
 
 class FilterAgent:
@@ -273,6 +281,8 @@ class FilterAgent:
             return "stop_too_wide"
         if setup.reward_risk < self.config.min_reward_risk:
             return "reward_risk"
+        if setup.setup in FLOW_CONFIRMED_SETUPS and setup.direction * gate.flow <= -self.config.flow_veto:
+            return "flow_against"
         return None
 
 
@@ -306,17 +316,18 @@ class AnalystAgent:
     def record_outcome(self, setup: DeskSetup, won: bool) -> None:
         self.live_counts[setup][0 if won else 1] += 1
 
-    def assess(self, setup: Setup) -> Assessment:
+    def assess(self, setup: Setup, flow: float = 0.0) -> Assessment:
         win_probability = self.posterior(setup.setup)
         reward_risk = setup.reward_risk
         expected_r = win_probability * reward_risk - (1 - win_probability)
 
-        edge_points = _clamp(expected_r / 0.5) * 35
-        trend_points = 20 if setup.trend_aligned else 0
-        volume_points = _clamp(setup.volume_ratio - 1.0) * 15
+        edge_points = _clamp(expected_r / 0.5) * 30
+        trend_points = 15 if setup.trend_aligned else 0
+        volume_points = _clamp(setup.volume_ratio - 1.0) * 10
+        flow_points = _clamp((setup.direction * flow + 0.1) / 0.5) * 15
         reward_points = _clamp((reward_risk - 1) / 2) * 15
         stop_points = 15 if 0.5 <= setup.stop_atr <= 2.0 else 7
-        score = round(edge_points + trend_points + volume_points + reward_points + stop_points)
+        score = round(edge_points + trend_points + volume_points + flow_points + reward_points + stop_points)
 
         return Assessment(score=score, win_probability=win_probability, expected_r=expected_r)
 

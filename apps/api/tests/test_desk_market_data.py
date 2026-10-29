@@ -155,7 +155,9 @@ class AlpacaClientTests(MarketDataTestCase):
             first = run_desk_session(config, watchlist_symbols=[], journal_trades=[], market_client=client)
             second = run_desk_session(config, watchlist_symbols=[], journal_trades=[], market_client=client)
 
-        self.assertEqual(len(fake.requests), 1)
+        # One bars request for every symbol, then one trade-print request per replayed day; the rerun is all cache.
+        self.assertEqual([request.url.path for request in fake.requests], ["/v2/stocks/bars"] + ["/v2/stocks/trades"] * 2)
+        self.assertEqual(first.flow_source, "trade prints")
         self.assertEqual(first.data_source, "alpaca")
         self.assertEqual(first.session_labels, ["2025-11-26", "2025-11-28"])
         self.assertEqual(first.config.symbols, ["AAPL", "NVDA"])

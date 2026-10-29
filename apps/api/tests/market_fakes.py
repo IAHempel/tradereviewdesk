@@ -78,19 +78,22 @@ def _parse_rfc3339(value: str) -> datetime:
 
 
 class FakeAlpaca:
-    """Serves /v2/stocks/bars (multi-symbol, page tokens) from generated rows and records requests."""
+    """Serves /v2/stocks/bars and /v2/stocks/trades (multi-symbol, page tokens) and records requests."""
 
     def __init__(self, *, coverage: dict[str, float] | None = None, page_size: int | None = None) -> None:
         self.coverage = coverage or {}
         self.page_size = page_size
         self.requests: list[httpx.Request] = []
         self.status_override: tuple[int, dict] | None = None
+        self.trades_status: tuple[int, dict] | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if self.status_override:
             status, body = self.status_override
             return httpx.Response(status, json=body)
+        if request.url.path == "/v2/stocks/trades":
+            return self._trades(request)
 
         params = request.url.params
         start, end = _parse_rfc3339(params["start"]), _parse_rfc3339(params["end"])
@@ -110,6 +113,33 @@ class FakeAlpaca:
             bars.setdefault(symbol, []).append(row)
         next_token = str(offset + self.page_size) if self.page_size and offset + self.page_size < len(flat) else None
         return httpx.Response(200, json={"bars": bars, "next_page_token": next_token})
+
+    def _trades(self, request: httpx.Request) -> httpx.Response:
+        """Trade prints (nanosecond timestamps, like Alpaca) with a buying bias in the first hour."""
+        if self.trades_status:
+            status, body = self.trades_status
+            return httpx.Response(status, json=body)
+        params = request.url.params
+        start, end = _parse_rfc3339(params["start"]), _parse_rfc3339(params["end"])
+        flat = []
+        for symbol in sorted(params["symbols"].split(",")):
+            rng = random.Random(f"{symbol}-{start.date()}")
+            price = 100 + rng.random() * 300
+            stamp = start
+            while stamp < end:
+                drift = 0.0004 if stamp - start < timedelta(hours=1) else 0.0
+                price *= math.exp(rng.gauss(drift, 0.0006))
+                text = stamp.strftime("%Y-%m-%dT%H:%M:%S") + f".{rng.randint(0, 999_999_999):09d}Z"
+                flat.append((symbol, {"t": text, "x": "V", "p": round(price, 2), "s": rng.randint(1, 300), "c": ["@"], "z": "C"}))
+                stamp += timedelta(seconds=rng.randint(20, 90))
+
+        offset = int(params.get("page_token") or 0)
+        page = flat[offset : offset + self.page_size] if self.page_size else flat
+        trades: dict[str, list[dict]] = {}
+        for symbol, row in page:
+            trades.setdefault(symbol, []).append(row)
+        next_token = str(offset + self.page_size) if self.page_size and offset + self.page_size < len(flat) else None
+        return httpx.Response(200, json={"trades": trades, "next_page_token": next_token})
 
     def client(self) -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(self.handler))

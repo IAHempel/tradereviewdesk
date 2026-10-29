@@ -40,6 +40,7 @@ from app.services.desk.agents import (
     map_journal_tags,
 )
 from app.services.desk.calendar import market_today
+from app.services.desk.flow import FlowMemory, flow_level, proxy_flow
 from app.services.desk.historical import PROVIDERS, load_historical_feed
 from app.services.desk.market import Bar, MarketFeed, SimulatedMarketFeed, bar_clock
 from app.services.desk.stats import build_summary, run_monte_carlo
@@ -97,6 +98,8 @@ class DeskSession:
         self.config = config
         self.feed = feed
         self.tapes = {symbol: SymbolTape(symbol) for symbol in config.symbols}
+        self.flow_memory = {symbol: FlowMemory() for symbol in config.symbols}
+        self.flow: dict[str, float] = {symbol: 0.0 for symbol in config.symbols}
         self.scout = ScoutAgent()
         self.filter = FilterAgent(config)
         self.analyst = AnalystAgent(config, journal)
@@ -168,6 +171,9 @@ class DeskSession:
         self.cooldown_until = -1
         self.loss_streak = 0
         session_bars = {symbol: self.feed.session_bars(symbol, session) for symbol in self.config.symbols}
+        session_flow = {symbol: self.feed.session_flow(symbol, session) for symbol in self.config.symbols}
+        for memory in self.flow_memory.values():
+            memory.reset()
         # Sessions vary in length on real data (1:00 pm early closes); every symbol is aligned to the same slots.
         self.session_length = len(session_bars[self.config.symbols[0]])
         first_step = len(self.frames)
@@ -183,6 +189,8 @@ class DeskSession:
             self.manage_positions(bars, is_last_bar=index == self.session_length - 1)
             for symbol, bar in bars.items():
                 self.tapes[symbol].append(bar)
+                prints = session_flow[symbol]
+                self.read_flow(symbol, prints[index] if prints is not None else proxy_flow(bar))
 
             day_pnl = self.equity(marks) - day_start_equity
             if not self.halted and day_pnl <= -day_start_equity * self.config.max_daily_loss_pct / 100:
@@ -328,6 +336,20 @@ class DeskSession:
                 f"{TILT_COOLDOWN_BARS * 5} minutes before taking new entries.",
             )
 
+    def read_flow(self, symbol: str, slot) -> None:
+        """Flow agent: updates the symbol's flow memory and speaks up when pressure turns strong."""
+        previous = self.flow[symbol]
+        imbalance = self.flow_memory[symbol].push(slot)
+        self.flow[symbol] = imbalance
+        if self.flow_memory[symbol].warmed_up and abs(imbalance) >= 0.5 > abs(previous):
+            self.log(
+                "flow",
+                "pressure",
+                f"Flow turned {flow_level(imbalance)} ({imbalance:+.2f} imbalance over the last "
+                f"{len(self.flow_memory[symbol].slots)} bars, {self.feed.flow_source}).",
+                symbol,
+            )
+
     def scan(self, index: int, marks: dict[str, float]) -> list[DeskScanMark]:
         scans: list[DeskScanMark] = []
         for symbol in self.config.symbols:
@@ -343,16 +365,27 @@ class DeskSession:
                     step=self.step,
                     busy_symbols=set(self.positions) | set(self.orders),
                     working_count=len(self.positions) + len(self.orders),
+                    flow=self.flow[symbol],
                 )
                 kill = self.filter.review(setup, gate)
                 if kill is not None:
                     self.logger.counts.filter_killed += 1
                     self.logger.kill("filter", kill)
-                    self.log("filter", "kill", f"{label} killed: {KILL_LABELS[kill].lower()}.", symbol)
+                    if kill == "flow_against":
+                        self.logger.counts.flow_vetoes += 1
+                        self.log(
+                            "flow",
+                            "veto",
+                            f"{label} killed: {flow_level(self.flow[symbol])} flow ({self.flow[symbol]:+.2f}) "
+                            "against a continuation setup.",
+                            symbol,
+                        )
+                    else:
+                        self.log("filter", "kill", f"{label} killed: {KILL_LABELS[kill].lower()}.", symbol)
                     scans.append(DeskScanMark(symbol=symbol, setup=setup.setup, side=setup.side, status="killed"))
                     continue
 
-                assessment = self.analyst.assess(setup)
+                assessment = self.analyst.assess(setup, self.flow[symbol])
                 self.logger.counts.analyst_scored += 1
                 verdict = self.analyst.verdict(assessment)
                 if verdict is not None:
@@ -387,7 +420,7 @@ class DeskSession:
                     "analyst",
                     "score",
                     f"{label}: {setup.thesis}. Score {assessment.score}, win rate {assessment.win_probability:.0%}, "
-                    f"R:R {setup.reward_risk:.1f}, EV {assessment.expected_r:+.2f}R.",
+                    f"R:R {setup.reward_risk:.1f}, flow {self.flow[symbol]:+.2f}, EV {assessment.expected_r:+.2f}R.",
                     symbol,
                 )
                 self.log(
@@ -426,6 +459,7 @@ class DeskSession:
             scans=scans,
             pipeline=self.logger.counts.model_copy(),
             halted=self.halted,
+            flow={symbol: round(value, 3) for symbol, value in self.flow.items()},
         )
 
     def build_response(self) -> DeskRunResponse:
@@ -496,6 +530,7 @@ class DeskSession:
             events=self.logger.events,
             monte_carlo=run_monte_carlo(self.trade_returns, seed=self.config.seed or 0),
             disclaimer=DESK_DISCLAIMER if self.feed.data_source == "synthetic" else HISTORICAL_DESK_DISCLAIMER,
+            flow_source=self.feed.flow_source,
         )
 
 
@@ -513,7 +548,12 @@ def run_desk_session(
     if resolved.data_source in PROVIDERS:
         assert resolved.end_date is not None
         feed, notes = load_historical_feed(
-            resolved.data_source, resolved.symbols, resolved.end_date, resolved.sessions, client=market_client
+            resolved.data_source,
+            resolved.symbols,
+            resolved.end_date,
+            resolved.sessions,
+            client=market_client,
+            trade_flow=resolved.use_trade_flow,
         )
         resolved = resolved.model_copy(update={"symbols": feed.symbols})
     else:

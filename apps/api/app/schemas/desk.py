@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 DeskSetup = Literal["breakout", "sweep_reclaim", "trend_pullback", "mean_reversion"]
 DeskDataSource = Literal["synthetic", "polygon", "alpaca"]
-DeskAgent = Literal["scout", "filter", "analyst", "risk", "executor", "logger"]
+DeskAgent = Literal["scout", "flow", "filter", "analyst", "risk", "executor", "logger"]
 DeskSide = Literal["long", "short"]
 DeskExitReason = Literal["stop", "trail", "target", "bell"]
 DeskScanStatus = Literal["killed", "ordered"]
@@ -42,6 +42,8 @@ class DeskConfig(BaseModel):
     sessions: int = Field(default=1, ge=1, le=5)
     allowed_setups: list[DeskSetup] = Field(default_factory=lambda: list(DESK_SETUPS), min_length=1)
     use_journal_priors: bool = True
+    use_trade_flow: bool = True
+    flow_veto: float = Field(default=0.35, ge=0.05, le=1.0)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
     @field_validator("symbols")
@@ -77,6 +79,7 @@ class DeskPipelineCounts(BaseModel):
     stops_trailed: int = 0
     stops_widened: int = 0
     logger_reasons: int = 0
+    flow_vetoes: int = 0
 
 
 class DeskPosition(BaseModel):
@@ -108,6 +111,7 @@ class DeskFrame(BaseModel):
     scans: list[DeskScanMark] = Field(default_factory=list)
     pipeline: DeskPipelineCounts
     halted: bool = False
+    flow: dict[str, float] = Field(default_factory=dict)
 
 
 class DeskEvent(BaseModel):
@@ -233,4 +237,5 @@ class DeskRunResponse(DeskRunSummaryResponse):
     frames: list[DeskFrame]
     events: list[DeskEvent]
     monte_carlo: DeskMonteCarlo | None = None
+    flow_source: str = "bar proxy"
     disclaimer: str = DESK_DISCLAIMER

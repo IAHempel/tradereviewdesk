@@ -44,13 +44,20 @@ class MarketDataError(Exception):
 
 
 class MarketFeed(Protocol):
-    """What the desk needs from a tape: aligned bars per symbol per session; session 0 is warmup."""
+    """What the desk needs from a tape: aligned bars per symbol per session; session 0 is warmup.
+
+    `session_flow` returns trade-print buy/sell volume per slot when the feed has prints,
+    else None (the Flow agent then falls back to its bar proxy).
+    """
 
     data_source: str
+    flow_source: str
     symbols: list[str]
     session_labels: list[str]
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]: ...
+
+    def session_flow(self, symbol: str, session: int) -> list | None: ...
 
 
 def bar_clock(index: int) -> str:
@@ -78,10 +85,14 @@ class SimulatedMarketFeed:
         self.seed = seed
         self.sessions = sessions
         self.session_labels = [f"Session {session}" for session in range(1, sessions + 1)]
+        self.flow_source = "bar proxy"
         self._tape = {symbol: self._generate(symbol) for symbol in self.symbols}
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]:
         return self._tape[symbol][session]
+
+    def session_flow(self, symbol: str, session: int) -> None:
+        return None
 
     def _generate(self, symbol: str) -> list[list[Bar]]:
         profile = _stable_int("profile", symbol)

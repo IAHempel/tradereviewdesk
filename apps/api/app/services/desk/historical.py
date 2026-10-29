@@ -19,6 +19,7 @@ import httpx
 from app.core.config import settings
 from app.services.desk import alpaca, polygon
 from app.services.desk.calendar import market_today, session_bar_count
+from app.services.desk.flow import PROXY_FLOW_SOURCE, TRADE_FLOW_SOURCE, FlowSlot
 from app.services.desk.market import Bar, MarketDataError
 from app.services.desk.slots import SlotBar
 
@@ -101,6 +102,55 @@ def _write_cache(provider: str, symbol: str, start: date, end: date, bars: list[
         pass
 
 
+def _flow_cache_file(symbol: str, day: date):
+    feed = settings.alpaca_flow_feed
+    return settings.market_data_cache_path / f"alpaca-flow-{feed}" / f"{symbol}_{day.isoformat()}.json"
+
+
+def _read_flow_cache(symbol: str, day: date) -> list[FlowSlot] | None:
+    try:
+        payload = json.loads(_flow_cache_file(symbol, day).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if payload.get("version") != CACHE_VERSION:
+        return None
+    return [FlowSlot(buy, sell) for buy, sell in payload["slots"]]
+
+
+def _write_flow_cache(symbol: str, day: date, slots: list[FlowSlot]) -> None:
+    path = _flow_cache_file(symbol, day)
+    payload = {"version": CACHE_VERSION, "slots": [[slot.buy_volume, slot.sell_volume] for slot in slots]}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        os.replace(handle.name, path)
+    except OSError:
+        pass
+
+
+def load_trade_flow(
+    symbols: list[str], days: list[date], *, client: httpx.Client
+) -> dict[str, dict[date, list[FlowSlot]]]:
+    """Tick-rule flow per symbol per completed day from Alpaca trade prints, cached per symbol-day."""
+    flows: dict[str, dict[date, list[FlowSlot]]] = {symbol: {} for symbol in symbols}
+    for day in days:
+        missing = []
+        for symbol in symbols:
+            cached = _read_flow_cache(symbol, day)
+            if cached is None:
+                missing.append(symbol)
+            else:
+                flows[symbol][day] = cached
+        if not missing:
+            continue
+        for symbol, slots in alpaca.fetch_trade_flow(missing, day, client=client).items():
+            if any(slot.total for slot in slots):
+                _write_flow_cache(symbol, day, slots)
+            flows[symbol][day] = slots
+    return flows
+
+
 def align_session(day: date, slot_bars: list[SlotBar]) -> list[Bar] | None:
     """One bar per 5-minute slot. Slots with no trades become flat zero-volume bars at the last close.
 
@@ -137,10 +187,22 @@ class HistoricalMarketFeed:
         self.days = days
         self.symbols = list(tape)
         self.session_labels = [day.isoformat() for day in days[1:]]
+        self.flow_source = PROXY_FLOW_SOURCE
         self._tape = tape
+        self._flows: dict[str, dict[date, list[FlowSlot]]] = {}
+
+    def attach_flow(self, flows: dict[str, dict[date, list[FlowSlot]]]) -> None:
+        self._flows = flows
+        self.flow_source = TRADE_FLOW_SOURCE
 
     def session_bars(self, symbol: str, session: int) -> list[Bar]:
         return self._tape[symbol][self.days[session]]
+
+    def session_flow(self, symbol: str, session: int) -> list[FlowSlot] | None:
+        slots = self._flows.get(symbol, {}).get(self.days[session])
+        if slots is None or len(slots) != len(self.session_bars(symbol, session)):
+            return None
+        return slots
 
 
 def build_feed(
@@ -207,8 +269,13 @@ def load_historical_feed(
     sessions: int,
     *,
     client: httpx.Client | None = None,
+    trade_flow: bool = False,
 ) -> tuple[HistoricalMarketFeed, list[str]]:
-    """Returns the feed plus notes about symbols that had to be dropped."""
+    """Returns the feed plus notes about dropped symbols and the flow source.
+
+    With `trade_flow` on an Alpaca feed, the replayed days also load IEX trade prints for
+    the Flow agent. If they can't load, the run continues on the bar proxy and says so.
+    """
     provider = PROVIDERS[source]
     if not provider.is_configured():
         raise MarketDataError(provider.missing_config, status_code=503)
@@ -220,18 +287,25 @@ def load_historical_feed(
     http = client or _http_client()
     try:
         fetched = fetch_cached(provider, symbols, start, end_date, client=http)
+        by_symbol = {symbol: group_by_day(slot_bars) for symbol, slot_bars in fetched.items()}
+        trading_days = sorted({day for grouped in by_symbol.values() for day in grouped})
+        needed = sessions + 1
+        if len(trading_days) < needed:
+            raise MarketDataError(
+                f"{provider.name} returned {len(trading_days)} trading day(s) of 5-minute bars between {start} and "
+                f"{end_date}; this run needs {needed} (one warmup session plus {sessions}). "
+                "Try a later date or fewer sessions.",
+                status_code=422,
+            )
+
+        feed, notes = build_feed(provider, by_symbol, trading_days[-needed:])
+        if trade_flow and provider.id == "alpaca":
+            try:
+                feed.attach_flow(load_trade_flow(feed.symbols, feed.days[1:], client=http))
+            except MarketDataError as exc:
+                notes.append(f"Flow agent fell back to the bar proxy: trade prints did not load ({exc.message})")
     finally:
         if owns_client:
             http.close()
 
-    by_symbol = {symbol: group_by_day(slot_bars) for symbol, slot_bars in fetched.items()}
-    trading_days = sorted({day for grouped in by_symbol.values() for day in grouped})
-    needed = sessions + 1
-    if len(trading_days) < needed:
-        raise MarketDataError(
-            f"{provider.name} returned {len(trading_days)} trading day(s) of 5-minute bars between {start} and {end_date}; "
-            f"this run needs {needed} (one warmup session plus {sessions}). Try a later date or fewer sessions.",
-            status_code=422,
-        )
-
-    return build_feed(provider, by_symbol, trading_days[-needed:])
+    return feed, notes

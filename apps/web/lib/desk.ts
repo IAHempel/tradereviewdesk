@@ -38,6 +38,8 @@ export const FALLBACK_DESK_CONFIG: DeskConfig = {
   sessions: 1,
   allowed_setups: DESK_SETUPS,
   use_journal_priors: true,
+  use_trade_flow: true,
+  flow_veto: 0.35,
   seed: null,
 };
 
@@ -54,6 +56,12 @@ export const DESK_AGENTS: AgentMeta[] = [
     label: "Scout",
     role: "Scans each closed bar for breakouts, sweeps, pullbacks, and stretches.",
     count: (p) => `${p.scout_flagged.toLocaleString()} setups`,
+  },
+  {
+    id: "flow",
+    label: "Flow",
+    role: "Keeps a 24-bar decaying memory of buy vs sell volume and vetoes continuation setups that fight it.",
+    count: (p) => `${p.flow_vetoes.toLocaleString()} vetoes`,
   },
   {
     id: "filter",
