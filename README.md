@@ -16,6 +16,8 @@ TradeReviewDesk is an AI-powered workflow platform for self-directed traders. Th
 
 TradeReviewDesk is not a signal service, not a brokerage, and not an auto-execution tool. The UI and API scaffolds intentionally frame outputs as workflow support, review assistance, and process discipline.
 
+The Agent Desk (below) keeps that boundary: it rehearses your rules on a synthetic tape with paper fills and has no path to a broker.
+
 ## Quick start
 
 ### Web app
@@ -168,6 +170,31 @@ For any hosted environment, use absolute HTTPS URLs and configure the web and AP
 - Asset type is optional and defaults to `stock`; supported values include `stock`, `option`, and `other`
 - Valid rows are imported immediately and invalid rows are returned with row-level errors
 
+## Agent Desk (paper)
+
+`/app/desk` runs a six-agent pipeline over your rules, bar by bar, and replays it like a live session:
+
+| Agent | Job |
+|---|---|
+| Scout | Scans each closed 5-minute bar for breakouts, liquidity sweeps that reclaim, trend pullbacks, and mean-reversion stretches |
+| Filter | Kills setups that break your hard rules: opening/closing windows, daily loss limit, loss-streak cooldown, symbol already working, max open positions, stop distance, minimum reward:risk |
+| Analyst | Scores survivors and keeps a Beta-posterior win rate per setup: a stated starting assumption, plus your tagged journal trades, plus this run's results |
+| Risk | Sizes each trade with the smaller of your risk cap and fractional Kelly, splits buying power across open slots, and trails stops (tighten only) |
+| Executor | Paper fills at the next bar's open with slippage and fees; stop is checked before target inside a bar; flat by the bell |
+| Logger | Records a reason for every decision so a run can be audited |
+
+What makes it honest rather than a screenshot generator:
+
+- **Synthetic tape, no edge baked in.** `apps/api/app/services/desk/market.py` is a seeded regime-switching random walk with intraday volatility and rare gaps. Results show how your rules behave in noise, not what they would earn.
+- **No lookahead.** Setups are detected on a closed bar and filled at the next open; tests assert it.
+- **Stops never widen.** The "stops widened" stat is audited per trade, not hard-coded.
+- **Deterministic.** Same seed and rules give the identical run, so sessions can be replayed and compared.
+- **Expectancy fan.** A 500-path bootstrap of the run's per-trade returns shows the spread of the next 100 trades, and a "screenshot reality check" turns viral "$142 → $2,870 in 6 days" claims into the daily return they imply.
+
+API: `GET /api/v1/desk/defaults`, `POST /api/v1/desk/runs`, `GET /api/v1/desk/runs`, `GET /api/v1/desk/runs/{id}`. Runs persist in the `desk_runs` table (migration `0009_desk_runs`), or in the JSON store in file mode (last 5 per user).
+
+Plugging in real data later means implementing the `SimulatedMarketFeed.session_bars(symbol, session)` shape against a market-data provider; the agents only see `Bar` objects.
+
 ## MVP coverage in this scaffold
 
 - monorepo structure
@@ -177,9 +204,11 @@ For any hosted environment, use absolute HTTPS URLs and configure the web and AP
 - SQLAlchemy models aligned to the startup brief schema
 - Pydantic and Zod schemas for report payloads
 - job-based report pipeline, CSV import validation, and Stripe-ready billing scaffolding
+- paper Agent Desk with deterministic synthetic tape, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
 
 ## Next implementation steps
 
 1. Expand billing from stub-safe local mode into live Stripe checkout and webhook deployment config
 2. Add token usage and per-report cost instrumentation around the live LLM path
 3. Extend automated tests into hosted-environment and browser-level workflows
+4. Agent Desk: replay real historical bars through a market-data provider behind the feed interface, then decide whether a broker paper-trading API belongs in scope before anything touches live execution

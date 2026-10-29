@@ -4,6 +4,9 @@ import type {
   BillingSessionResult,
   ChecklistRun,
   ChecklistTemplate,
+  DeskConfig,
+  DeskRun,
+  DeskRunSummary,
   Profile,
   ReportGenerationResult,
   ReportJobRecord,
@@ -159,4 +162,28 @@ export async function createPortalSessionInBackend(returnUrl?: string): Promise<
       return_url: returnUrl ?? null,
     }),
   });
+}
+
+export async function getDeskDefaultsFromBackend(): Promise<DeskConfig | null> {
+  try {
+    return await getBackendJson<DeskConfig>("/api/v1/desk/defaults", { cache: "no-store" });
+  } catch {
+    return null;
+  }
+}
+
+export async function getDeskRunsFromBackend(): Promise<DeskRunSummary[]> {
+  try {
+    return await getBackendJson<DeskRunSummary[]>("/api/v1/desk/runs", { cache: "no-store" });
+  } catch {
+    return [];
+  }
+}
+
+export async function getDeskRunFromBackend(runId: string): Promise<DeskRun | null> {
+  try {
+    return await getBackendJson<DeskRun>(`/api/v1/desk/runs/${encodeURIComponent(runId)}`, { cache: "no-store" });
+  } catch {
+    return null;
+  }
 }

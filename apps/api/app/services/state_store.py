@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.core.auth import LOCAL_DEMO_AUTH_PROVIDER_ID
 from app.schemas.checklists import ChecklistRunResponse, ChecklistTemplateResponse
+from app.schemas.desk import DeskRunResponse
 from app.schemas.profile import ProfileResponse, ProfileUpdate
 from app.schemas.reports import ReportResponse
 from app.schemas.trades import TradeEntryResponse
@@ -185,6 +186,23 @@ def save_reports(items: list[ReportResponse], current_user: "CurrentUser | None"
     def mutator(state: dict[str, Any]) -> list[ReportResponse]:
         scoped_state = _get_scoped_state(state, current_user)
         scoped_state["reports"] = [item.model_dump() for item in items]
+        return items
+
+    return _with_state(mutator)
+
+
+def list_desk_runs(current_user: "CurrentUser | None" = None) -> list[DeskRunResponse]:
+    return _read(
+        lambda state: [
+            DeskRunResponse.model_validate(item) for item in _get_scoped_state(state, current_user).get("desk_runs", [])
+        ]
+    )
+
+
+def save_desk_runs(items: list[DeskRunResponse], current_user: "CurrentUser | None" = None) -> list[DeskRunResponse]:
+    def mutator(state: dict[str, Any]) -> list[DeskRunResponse]:
+        scoped_state = _get_scoped_state(state, current_user)
+        scoped_state["desk_runs"] = [item.model_dump() for item in items]
         return items
 
     return _with_state(mutator)

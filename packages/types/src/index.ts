@@ -170,3 +170,192 @@ export interface ReportGenerationResult {
   job: ReportJobRecord;
   report: ReportRecord | null;
 }
+
+export type DeskSetup = "breakout" | "sweep_reclaim" | "trend_pullback" | "mean_reversion";
+export type DeskAgent = "scout" | "filter" | "analyst" | "risk" | "executor" | "logger";
+export type DeskSide = "long" | "short";
+
+export interface DeskConfig {
+  symbols: string[];
+  starting_balance: number;
+  risk_per_trade_pct: number;
+  kelly_fraction: number;
+  max_open_positions: number;
+  max_daily_loss_pct: number;
+  max_consecutive_losses: number;
+  min_reward_risk: number;
+  min_score: number;
+  trail_after_r: number;
+  max_leverage: number;
+  fee_bps: number;
+  slippage_bps: number;
+  sessions: number;
+  allowed_setups: DeskSetup[];
+  use_journal_priors: boolean;
+  seed: number | null;
+}
+
+export interface DeskPipelineCounts {
+  scout_flagged: number;
+  filter_killed: number;
+  analyst_scored: number;
+  analyst_killed: number;
+  risk_sized: number;
+  risk_rejected: number;
+  executor_fills: number;
+  executor_cancels: number;
+  executor_exits: number;
+  stops_trailed: number;
+  stops_widened: number;
+  logger_reasons: number;
+}
+
+export interface DeskPosition {
+  trade_id: string;
+  symbol: string;
+  side: DeskSide;
+  setup: DeskSetup;
+  entry: number;
+  stop: number;
+  target: number;
+  last: number;
+  r_now: number;
+  unrealized: number;
+}
+
+export interface DeskScanMark {
+  symbol: string;
+  setup: DeskSetup;
+  side: DeskSide;
+  status: "killed" | "ordered";
+}
+
+export interface DeskFrame {
+  step: number;
+  session: number;
+  clock: string;
+  equity: number;
+  positions: DeskPosition[];
+  scans: DeskScanMark[];
+  pipeline: DeskPipelineCounts;
+  halted: boolean;
+}
+
+export interface DeskEvent {
+  step: number;
+  session: number;
+  clock: string;
+  agent: DeskAgent;
+  symbol: string | null;
+  kind: string;
+  message: string;
+}
+
+export interface DeskTrade {
+  id: string;
+  symbol: string;
+  side: DeskSide;
+  setup: DeskSetup;
+  session: number;
+  open_step: number;
+  close_step: number;
+  opened_at: string;
+  closed_at: string;
+  entry: number;
+  exit: number;
+  stop_initial: number;
+  stop_final: number;
+  target: number;
+  quantity: number;
+  risk_dollars: number;
+  fees: number;
+  pnl: number;
+  r_multiple: number;
+  exit_reason: "stop" | "trail" | "target" | "bell";
+  score: number;
+  win_probability: number;
+  thesis: string;
+}
+
+export interface DeskSetupEdge {
+  setup: DeskSetup;
+  enabled: boolean;
+  prior_wins: number;
+  prior_losses: number;
+  journal_wins: number;
+  journal_losses: number;
+  live_wins: number;
+  live_losses: number;
+  posterior_win_rate: number;
+  trades: number;
+  avg_r: number | null;
+}
+
+export interface DeskKillReason {
+  agent: DeskAgent;
+  code: string;
+  label: string;
+  count: number;
+}
+
+export interface DeskMonteCarloBand {
+  trade_index: number;
+  p5: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+}
+
+export interface DeskMonteCarlo {
+  paths: number;
+  trades_per_path: number;
+  sample_size: number;
+  bands: DeskMonteCarloBand[];
+  probability_below_start: number;
+  probability_drawdown_20: number;
+  median_multiple: number;
+}
+
+export interface DeskSummary {
+  starting_balance: number;
+  ending_balance: number;
+  net_pnl: number;
+  return_pct: number;
+  multiple: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  avg_win_r: number | null;
+  avg_loss_r: number | null;
+  expectancy_r: number | null;
+  profit_factor: number | null;
+  max_drawdown_pct: number;
+  best_trade: number | null;
+  worst_trade: number | null;
+  fees_paid: number;
+  sessions: number;
+  halted_sessions: number;
+}
+
+export interface DeskRunSummary {
+  id: string;
+  created_at: string;
+  mode: "paper";
+  data_source: "synthetic";
+  config: DeskConfig;
+  summary: DeskSummary;
+}
+
+export interface DeskRun extends DeskRunSummary {
+  bars_per_session: number;
+  pipeline: DeskPipelineCounts;
+  setup_edges: DeskSetupEdge[];
+  kill_reasons: DeskKillReason[];
+  trades: DeskTrade[];
+  frames: DeskFrame[];
+  events: DeskEvent[];
+  monte_carlo: DeskMonteCarlo | null;
+  disclaimer: string;
+}
