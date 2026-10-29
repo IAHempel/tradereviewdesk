@@ -91,6 +91,19 @@ class DeskEngineTests(unittest.TestCase):
         result = run(sessions=5, allowed_setups=["breakout"])
         self.assertTrue(all(trade.setup == "breakout" for trade in result.trades))
 
+    def test_tape_lines_up_with_frames(self) -> None:
+        result = run()
+        feed = SimulatedMarketFeed(SYMBOLS, 11, 3)
+        for symbol in SYMBOLS:
+            self.assertEqual(len(result.tape[symbol]), len(result.frames))
+            bar = feed.session_bars(symbol, 2)[5]
+            self.assertEqual(result.tape[symbol][BARS_PER_SESSION + 5], [bar.open, bar.high, bar.low, bar.close, bar.volume])
+
+    def test_milestones_are_validated(self) -> None:
+        self.assertEqual(DeskConfig(milestones=[1.05, 1.01, 1.05]).milestones, [1.01, 1.05])
+        with self.assertRaises(ValueError):
+            DeskConfig(milestones=[0.9])
+
     def test_equity_accounting_balances(self) -> None:
         result = run(sessions=4)
         summary = result.summary

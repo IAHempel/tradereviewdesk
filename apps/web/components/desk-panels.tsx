@@ -73,6 +73,8 @@ export function AgentIcon({ agent, className }: { agent: DeskAgent; className?: 
   );
 }
 
+const AGENT_LABELS = Object.fromEntries(DESK_AGENTS.map((agent) => [agent.id, agent.label])) as Record<DeskAgent, string>;
+
 function agentForScan(status: "killed" | "ordered"): DeskAgent {
   return status === "ordered" ? "executor" : "filter";
 }
@@ -313,7 +315,7 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
                 : "border-white/10 text-slate-400 hover:border-white/25 hover:text-slate-200",
             )}
           >
-            {agent}
+            {agent === "all" ? "All" : AGENT_LABELS[agent]}
           </button>
         ))}
       </div>
@@ -327,7 +329,7 @@ export function ActivityFeed({ events, step }: { events: DeskEvent[]; step: numb
             </span>
             <span className="hidden items-center gap-1 capitalize text-slate-300 sm:flex">
               <AgentIcon agent={event.agent} className="h-3.5 w-3.5 text-slate-400" />
-              {event.agent}
+              {AGENT_LABELS[event.agent]}
             </span>
             <span className="text-slate-300">
               <AgentIcon agent={event.agent} className="mr-1 inline h-3.5 w-3.5 align-[-2px] text-slate-400 sm:hidden" />
@@ -726,6 +728,20 @@ export function DeskRulesForm({
           <NumberField label="Cool down after N losses" value={config.max_consecutive_losses} onChange={(v) => set("max_consecutive_losses", v)} step={1} min={1} max={10} />
           <NumberField label="Trail stop after (R)" value={config.trail_after_r} onChange={(v) => set("trail_after_r", v)} step={0.25} min={0.5} max={5} />
           <NumberField label="Min reward:risk" value={config.min_reward_risk} onChange={(v) => set("min_reward_risk", v)} step={0.25} min={1} max={5} />
+          <label className="grid gap-1 text-xs text-slate-400 sm:col-span-2" title="Equity multiples shown on the ladder. In live mode each one is a keep-running checkpoint.">
+            Milestones (equity multiples)
+            <input
+              defaultValue={config.milestones.join(", ")}
+              onBlur={(event) => {
+                const values = event.target.value
+                  .split(/[\s,]+/)
+                  .map(Number)
+                  .filter((value) => Number.isFinite(value) && value > 1);
+                set("milestones", values.length ? values.slice(0, 6) : config.milestones);
+              }}
+              className={fieldClass}
+            />
+          </label>
         </div>
       </div>
 

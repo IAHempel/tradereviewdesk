@@ -6,6 +6,7 @@ import clsx from "clsx";
 import type { DeskConfig, DeskDataSourceInfo, DeskRun, DeskRunSummary } from "@tradenoc/types";
 import { Card } from "@tradenoc/ui";
 import { EquityChart, KillReasonBars, MonteCarloFan, ScoutRadar } from "@/components/desk-charts";
+import { AgentCards, AlertBanner, CandlestickChart, MilestoneLadder, TickerStrip } from "@/components/desk-visuals";
 import {
   ActivityFeed,
   ClaimCheckCard,
@@ -255,6 +256,11 @@ export function DeskWorkspace({
         className="relative overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(52,211,153,0.16),transparent_45%),radial-gradient(circle_at_90%_10%,rgba(103,232,249,0.14),transparent_40%),linear-gradient(180deg,#0b1424,#050a14)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.55)]"
         aria-label="Agent desk console"
       >
+        {run && view ? (
+          <div className="mb-4">
+            <TickerStrip run={run} view={view} step={step} />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="font-mono text-2xl font-semibold tabular-nums text-white">{frame?.clock ?? "09:30"}</p>
           <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-xs text-slate-300">
@@ -265,6 +271,65 @@ export function DeskWorkspace({
             <span className="font-semibold text-white">{DESK_AGENTS.length}</span> agents
           </p>
         </div>
+
+        {run && view ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => (view.isComplete ? replay() : setPlaying((value) => !value))}
+            className="rounded-full border border-white/15 px-4 py-1.5 text-sm font-medium text-white transition hover:border-cyan-300/60"
+          >
+            {view.isComplete ? "Replay" : playing ? "Pause" : "Play"}
+          </button>
+          <div className="flex rounded-full border border-white/10 p-0.5" role="group" aria-label="Replay speed">
+            {SPEEDS.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => setSpeed(option.bars)}
+                aria-pressed={speed === option.bars}
+                className={clsx(
+                  "rounded-full px-3 py-1 text-xs transition",
+                  speed === option.bars ? "bg-white/10 text-white" : "text-slate-400 hover:text-white",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={lastStep}
+            value={step}
+            onChange={(event) => {
+              setPlaying(false);
+              setStep(event.target.valueAsNumber);
+            }}
+            className="min-w-[10rem] flex-1 accent-cyan-300"
+            aria-label="Replay position"
+          />
+          <span className="font-mono text-xs tabular-nums text-slate-400">
+            bar {step + 1}/{lastStep + 1}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setPlaying(false);
+              setStep(lastStep);
+            }}
+            className="text-xs text-slate-400 underline-offset-2 hover:text-white hover:underline"
+          >
+            Skip to end
+          </button>
+        </div>
+        ) : null}
+
+        {run ? (
+          <div className="mt-3">
+            <AlertBanner events={run.events} step={frame?.step ?? 0} />
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-5 md:grid-cols-[1fr_auto]">
           <div>
@@ -357,12 +422,30 @@ export function DeskWorkspace({
           </div>
         )}
 
+        {run && view ? (
+          <div className="mt-4">
+            <MilestoneLadder run={run} view={view} />
+          </div>
+        ) : null}
+
         <div className="mt-4">
           <PipelineStrip frame={frame} events={run?.events ?? []} active={playing} />
         </div>
 
         {run && view ? (
           <>
+            <div className="mt-4">
+              <AgentCards run={run} step={step} />
+            </div>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-semibold text-white">Tape</p>
+                <p className="text-xs text-slate-400">
+                  5-minute candles · {sessionLabel(run, frame?.session ?? 1)} · flow from {run.flow_source ?? "bar proxy"}
+                </p>
+              </div>
+              <CandlestickChart run={run} step={step} />
+            </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <PositionsPanel frame={frame} run={run} />
               <ClosedTradesPanel trades={view.closedTrades} wins={view.wins} losses={view.losses} />
@@ -386,56 +469,6 @@ export function DeskWorkspace({
               />
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-              <button
-                type="button"
-                onClick={() => (view.isComplete ? replay() : setPlaying((value) => !value))}
-                className="rounded-full border border-white/15 px-4 py-1.5 text-sm font-medium text-white transition hover:border-cyan-300/60"
-              >
-                {view.isComplete ? "Replay" : playing ? "Pause" : "Play"}
-              </button>
-              <div className="flex rounded-full border border-white/10 p-0.5" role="group" aria-label="Replay speed">
-                {SPEEDS.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    onClick={() => setSpeed(option.bars)}
-                    aria-pressed={speed === option.bars}
-                    className={clsx(
-                      "rounded-full px-3 py-1 text-xs transition",
-                      speed === option.bars ? "bg-white/10 text-white" : "text-slate-400 hover:text-white",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={lastStep}
-                value={step}
-                onChange={(event) => {
-                  setPlaying(false);
-                  setStep(event.target.valueAsNumber);
-                }}
-                className="min-w-[10rem] flex-1 accent-cyan-300"
-                aria-label="Replay position"
-              />
-              <span className="font-mono text-xs tabular-nums text-slate-400">
-                bar {step + 1}/{lastStep + 1}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlaying(false);
-                  setStep(lastStep);
-                }}
-                className="text-xs text-slate-400 underline-offset-2 hover:text-white hover:underline"
-              >
-                Skip to end
-              </button>
-            </div>
           </>
         ) : null}
 

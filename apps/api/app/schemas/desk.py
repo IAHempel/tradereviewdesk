@@ -47,6 +47,7 @@ class DeskConfig(BaseModel):
     use_ai_seat: bool = True
     ai_seat_budget: int = Field(default=8, ge=0, le=30)
     seat_veto: float = Field(default=0.7, ge=0.3, le=1.0)
+    milestones: list[float] = Field(default_factory=lambda: [1.01, 1.02, 1.05, 1.1], max_length=6)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
     @field_validator("symbols")
@@ -62,6 +63,14 @@ class DeskConfig(BaseModel):
             if symbol not in normalized:
                 normalized.append(symbol)
         return normalized
+
+    @field_validator("milestones")
+    @classmethod
+    def ascending_milestones(cls, value: list[float]) -> list[float]:
+        cleaned = sorted({round(item, 4) for item in value})
+        if any(item <= 1 or item > 100 for item in cleaned):
+            raise ValueError("Milestones are equity multiples above 1 (for example 1.02 for +2%).")
+        return cleaned
 
     @field_validator("allowed_setups")
     @classmethod
@@ -267,4 +276,6 @@ class DeskRunResponse(DeskRunSummaryResponse):
     monte_carlo: DeskMonteCarlo | None = None
     flow_source: str = "bar proxy"
     seat_verdicts: list[DeskSeatVerdict] = Field(default_factory=list)
+    # Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`.
+    tape: dict[str, list[list[float]]] = Field(default_factory=dict)
     disclaimer: str = DESK_DISCLAIMER

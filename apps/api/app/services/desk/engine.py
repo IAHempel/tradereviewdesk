@@ -111,6 +111,7 @@ class DeskSession:
         self.seat = SkepticSeat(config)
         self.logger = LoggerAgent()
         self.seat_verdicts: list[DeskSeatVerdict] = []
+        self.tape: dict[str, list[list[float]]] = {symbol: [] for symbol in config.symbols}
 
         self.realized = 0.0
         self.fees_paid = 0.0
@@ -194,6 +195,7 @@ class DeskSession:
             self.manage_positions(bars, is_last_bar=index == self.session_length - 1)
             for symbol, bar in bars.items():
                 self.tapes[symbol].append(bar)
+                self.tape[symbol].append([bar.open, bar.high, bar.low, bar.close, bar.volume])
                 prints = session_flow[symbol]
                 self.read_flow(symbol, prints[index] if prints is not None else proxy_flow(bar))
 
@@ -588,6 +590,7 @@ class DeskSession:
             disclaimer=DESK_DISCLAIMER if self.feed.data_source == "synthetic" else HISTORICAL_DESK_DISCLAIMER,
             flow_source=self.feed.flow_source,
             seat_verdicts=self.seat_verdicts,
+            tape=self.tape,
         )
 
 

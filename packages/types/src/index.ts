@@ -207,6 +207,7 @@ export interface DeskConfig {
   use_ai_seat: boolean;
   ai_seat_budget: number;
   seat_veto: number;
+  milestones: number[];
   seed: number | null;
 }
 
@@ -402,4 +403,6 @@ export interface DeskRun extends DeskRunSummary {
   disclaimer: string;
   flow_source: string;
   seat_verdicts: DeskSeatVerdict[];
+  /** Per symbol, one [open, high, low, close, volume] per frame, aligned with `frames`. */
+  tape: Record<string, number[][]>;
 }

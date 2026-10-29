@@ -43,6 +43,7 @@ export const FALLBACK_DESK_CONFIG: DeskConfig = {
   use_ai_seat: true,
   ai_seat_budget: 8,
   seat_veto: 0.7,
+  milestones: [1.01, 1.02, 1.05, 1.1],
   seed: null,
 };
 
