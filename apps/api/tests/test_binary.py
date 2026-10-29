@@ -119,6 +119,15 @@ class BinarySimulationTests(unittest.TestCase):
                     checked += 1
         self.assertGreater(checked, 100)
 
+    def test_without_skew_no_bid_is_above_fair_value(self) -> None:
+        result = run(inventory_skew_cents=0, hours=6, assets=["BTC", "ETH", "SOL", "XRP", "DOGE"])
+        fair = {series.asset: series.fair_up for series in result.series}
+        self.assertTrue(result.fills)
+        for fill in result.fills:
+            value = fair[fill.asset][fill.minute] if fill.side == "up" else 1 - fair[fill.asset][fill.minute]
+            self.assertLessEqual(fill.price, value + 0.001)
+            self.assertGreaterEqual(fill.price, 0.01)
+
     def test_baseline_is_the_same_rules_against_an_efficient_crowd(self) -> None:
         result = run(hours=4)
         self.assertNotEqual(result.baseline.net_pnl, result.summary.net_pnl)

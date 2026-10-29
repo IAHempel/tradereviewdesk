@@ -172,14 +172,16 @@ For any hosted environment, use absolute HTTPS URLs and configure the web and AP
 
 ## Agent Desk (paper)
 
-`/app/desk` runs a six-agent pipeline over your rules, bar by bar, and replays it like a live session:
+`/app/desk` runs an eight-agent pipeline over your rules, bar by bar, and replays it like a live session:
 
 | Agent | Job |
 |---|---|
 | Scout | Scans each closed 5-minute bar for breakouts, liquidity sweeps that reclaim, trend pullbacks, and mean-reversion stretches |
-| Filter | Kills setups that break your hard rules: opening/closing windows, daily loss limit, loss-streak cooldown, symbol already working, max open positions, stop distance, minimum reward:risk |
+| Flow | Keeps a 24-bar decaying memory of buy vs sell volume per symbol: tick-rule classified IEX trade prints on Alpaca, a labelled bar proxy elsewhere |
+| Filter | Kills setups that break your hard rules: opening/closing windows, daily loss limit, loss-streak cooldown, symbol already working, max open positions, stop distance, minimum reward:risk, and continuation setups fighting strong flow |
 | Analyst | Scores survivors and keeps a Beta-posterior win rate per setup: a stated starting assumption, plus your tagged journal trades, plus this run's results |
 | Risk | Sizes each trade with the smaller of your risk cap and fractional Kelly, splits buying power across open slots, and trails stops (tighten only) |
+| Skeptic | Answers four yes/no risk questions with probabilities on each sized order (your LLM within a per-run budget, else a built-in scorer) and vetoes above your threshold |
 | Executor | Paper fills at the next bar's open with slippage and fees; stop is checked before target inside a bar; flat by the bell |
 | Logger | Records a reason for every decision so a run can be audited |
 
@@ -219,6 +221,15 @@ With Alpaca keys set, **Live paper session** on the Agent Desk runs today's mark
 - **Ticking.** Loading the desk ticks a session that has missed a bar. For updates and notifications with no browser open, run the worker: `python -m app.workers.desk_live_worker` (see `DEPLOYMENT_ENV_MATRIX.md`).
 - **Migration.** `0010_desk_live_sessions` adds the `desk_live_sessions` table.
 
+## Binary desk (paper)
+
+`/app/binary` simulates a two-sided grid on 15-minute crypto Up/Down markets (BTC, ETH, SOL, XRP, DOGE), the style of bot in viral "prediction market" screenshots.
+
+- **Real underlying, modeled market.** Fair P(up) comes from 1-minute candles: Coinbase's public candles API (no key; `COINBASE_BASE_URL` to override) or a seeded synthetic tape. Each window resolves on the real close. The prediction market itself is modeled: the crowd's price is fair value seen `crowd_lag_minutes` late plus mean-reverting noise, and a resting bid fills only when the crowd trades through it, at `queue_fill_probability`.
+- **The grid.** Bids on both sides so that each minute's quotes would lock a pair under $1, shaded against inventory, capped per side, and pulled a few minutes before each close. Pairs filled in different minutes can still cost more than $1 when fair value moves between fills; the run reports that.
+- **Efficient-crowd baseline.** Every run is repeated against a crowd with no lag and no noise. In testing, the default one-minute lag is what turns a losing grid into a winning one; the console puts both numbers side by side.
+- API: `GET /api/v1/binary/defaults`, `POST /api/v1/binary/runs`, `GET /api/v1/binary/runs`, `GET /api/v1/binary/runs/{id}`; runs persist in `binary_runs` (migration `0011_binary_runs`).
+
 ## MVP coverage in this scaffold
 
 - monorepo structure
@@ -228,7 +239,8 @@ With Alpaca keys set, **Live paper session** on the Agent Desk runs today's mark
 - SQLAlchemy models aligned to the startup brief schema
 - Pydantic and Zod schemas for report payloads
 - job-based report pipeline, CSV import validation, and Stripe-ready billing scaffolding
-- paper Agent Desk with a synthetic tape or Alpaca/Polygon historical bars, six-agent pipeline, replayable runs, and Monte Carlo expectancy fan
+- paper Agent Desk: eight agents (including order flow and an AI Skeptic seat), synthetic or Alpaca/Polygon historical bars, live paper mode with keep-running checkpoints and notifications, replayable runs, and a Monte Carlo expectancy fan
+- paper Binary desk: two-sided grid on modeled 15-minute crypto Up/Down markets with an efficient-crowd baseline
 
 ## Next implementation steps
 

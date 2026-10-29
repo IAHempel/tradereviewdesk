@@ -1,4 +1,7 @@
 export {
+  getBinaryDefaultsFromBackend as getBinaryDefaults,
+  getBinaryRunFromBackend as getBinaryRun,
+  getBinaryRunsFromBackend as getBinaryRuns,
   getSubscriptionFromBackend as getSubscription,
   getReportJobsFromBackend as getReportJobs,
   getChecklistRunsFromBackend as getChecklistRuns,

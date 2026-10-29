@@ -230,12 +230,13 @@ def _simulate_asset(
                 reservation = fair_up - skew * (book.up_shares - book.down_shares) / config.max_shares_per_side
                 for level in range(config.levels):
                     room = config.shares_per_level * (level + 1)
-                    if book.up_shares + room <= config.max_shares_per_side:
-                        resting.append(Order("up", round(_clip(reservation - half_spread - level * step), 3), config.shares_per_level, level))
-                    if book.down_shares + room <= config.max_shares_per_side:
-                        resting.append(
-                            Order("down", round(_clip(1 - reservation - half_spread - level * step), 3), config.shares_per_level, level)
-                        )
+                    up_price = round(min(reservation - half_spread - level * step, MAX_PRICE), 3)
+                    down_price = round(min(1 - reservation - half_spread - level * step, MAX_PRICE), 3)
+                    # A bid that would sit under the minimum tick is skipped, never rounded up past fair value.
+                    if up_price >= MIN_PRICE and book.up_shares + room <= config.max_shares_per_side:
+                        resting.append(Order("up", up_price, config.shares_per_level, level))
+                    if down_price >= MIN_PRICE and book.down_shares + room <= config.max_shares_per_side:
+                        resting.append(Order("down", down_price, config.shares_per_level, level))
             crowd_previous = crowd_up
             bids_up.append(next((order.price for order in resting if order.side == "up" and order.level == 0), None))
             bids_down.append(next((order.price for order in resting if order.side == "down" and order.level == 0), None))
